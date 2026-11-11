@@ -1,13 +1,15 @@
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
+ENV MONGOMS_DISABLE_POSTINSTALL=1
 COPY package.json package-lock.json ./
 COPY server/package.json server/package.json
 COPY client/package.json client/package.json
-RUN npm ci
+COPY scripts ./scripts
+RUN npm ci && node scripts/install-native-binaries.mjs
 COPY . .
 RUN npm run build
 
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
@@ -16,6 +18,7 @@ COPY server/package.json server/package.json
 COPY client/package.json client/package.json
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server/src ./server/src
+COPY shared ./shared
 COPY --from=build /app/client/dist ./client/dist
 RUN mkdir -p server/data server/pacsd-backups && chown -R node:node /app
 USER node

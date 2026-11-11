@@ -1,9 +1,9 @@
 [build]
-  command = "npm run build"
+  command = "node scripts/install-native-binaries.mjs && npm run build"
   publish = "client/dist"
 
 [build.environment]
-  NODE_VERSION = "22"
+  NODE_VERSION = "24"
   MONGOMS_DISABLE_POSTINSTALL = "1"
 
 # Replace pacsd-api.onrender.com with your Render service URL.
