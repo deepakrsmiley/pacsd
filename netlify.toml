@@ -4,6 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  MONGOMS_DISABLE_POSTINSTALL = "1"
 
 # Replace pacsd-api.onrender.com with your Render service URL.
 [[redirects]]
