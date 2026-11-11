@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0b0b0f;
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.report-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: #a1a1aa;
+  pointer-events: none;
+}
+
+.report-editor b,
+.report-editor strong {
+  font-weight: 700;
+}
+
+.report-editor i,
+.report-editor em {
+  font-style: italic;
+}
+
+.sheet {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto 24px;
+  background: #fff;
+  color: #1e1b4b;
+  font-family: "Segoe UI", Arial, sans-serif;
+  box-shadow: 0 12px 40px rgba(30, 27, 75, 0.16);
+  box-sizing: border-box;
+}
+.sheet-head, .sheet-foot {
+  background: linear-gradient(90deg, #1a0a46 0%, #3b1780 42%, #6d28d9 100%);
+  color: #fff;
+}
+.sheet-row {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  gap: 8px;
+  align-items: start;
+  margin: 4px 8px;
+  padding: 5px 8px;
+  border: 1px solid #ece7f8;
+  border-radius: 10px;
+}
+.sheet-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #5b21b6;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.kv td:first-child {
+  width: 108px;
+  white-space: nowrap;
+  color: #6d28d9;
+  vertical-align: top;
+}
+.kv td:nth-child(2) {
+  width: 10px;
+  vertical-align: top;
+}
+.kv td:last-child {
+  font-weight: 650;
+  font-weight: 600;
+}
+.sheet-frame {
+  position: relative;
+  height: 34mm;
+  overflow: hidden;
+  background: #111;
+}
+.sheet-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+@media print {
+  html, body, #root, .print-root {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .sheet {
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
+
+.report-editor u {
+  text-decoration: underline;
+}
+
+.report-editor ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.report-editor ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #c4b5fd;
+  outline-offset: 2px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Shared finish for pages inside the app shell. The viewer and report editor render outside it. */
+.ui-apple {
+  color-scheme: dark;
+}
+
+.ui-apple option {
+  background-color: #1c1c21;
+  color: #f5f5f7;
+}
+
+.ui-apple .uppercase {
+  text-transform: capitalize;
+  letter-spacing: 0;
+}
+
+.ui-apple [class~="border"]:not([class*="rounded"]):not(tr, td, th, table) {
+  border-radius: 14px;
+}
+
+.ui-apple :is(button, input, select, textarea)[class]:not([class*="rounded"]):not([type="checkbox"], [type="radio"]) {
+  border-radius: 10px;
+}
+
+.ui-apple :is(button, a, input, select, textarea) {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+
+.ui-apple button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.ui-apple .bg-\[\#5b21b6\] {
+  background-color: #7c3aed;
+  font-weight: 500;
+}
+
+.ui-apple .bg-\[\#5b21b6\]:hover:not(:disabled) {
+  background-color: #8b5cf6;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

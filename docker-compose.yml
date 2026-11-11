@@ -1,0 +1,54 @@
+services:
+  pacsd:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+      MONGODB_URI: ${MONGODB_URI}
+      SESSION_SECRET: ${SESSION_SECRET}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_TEMPLATE_NAME: ${WHATSAPP_TEMPLATE_NAME:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      ORTHANC_URL: ${ORTHANC_URL:-}
+      ORTHANC_USERNAME: ${ORTHANC_USERNAME:-}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-}
+      BACKUP_DIR: /app/server/pacsd-backups
+    volumes:
+      - pacsd-dicom:/app/server/data
+      - pacsd-backups:/app/server/pacsd-backups
+
+  orthanc:
+    image: orthancteam/orthanc:24.10.2
+    profiles: ["dicom"]
+    restart: unless-stopped
+    ports:
+      - "8042:8042"
+      - "4242:4242"
+    environment:
+      ORTHANC__NAME: "PACSD Archive"
+      ORTHANC__REGISTERED_USERS: "{\"pacsd\":\"${ORTHANC_PASSWORD}\"}"
+
+  mongo:
+    image: mongo:7
+    profiles: ["mongo"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - pacsd-mongo:/data/db
+
+volumes:
+  pacsd-dicom:
+  pacsd-backups:
+  pacsd-mongo:

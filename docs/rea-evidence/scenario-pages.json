@@ -1,0 +1,138 @@
+{
+  "browser": {
+    "mode": "launch",
+    "executable_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "headless": true
+  },
+  "start_url": {
+    "url": "https://somatiq.ai/",
+    "query": []
+  },
+  "environment": {
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "device_scale_factor": 1
+    },
+    "locale": "en-US",
+    "timezone": "Asia/Kolkata",
+    "color_scheme": "light",
+    "reduced_motion": "no-preference",
+    "service_workers": "block"
+  },
+  "actions": [
+    {
+      "step_id": "open-0",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/teleradiology",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-1",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/portfolio/radone",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-2",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/portfolio/invoiceiq",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-3",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/about",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-4",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/book-a-demo",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-5",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/blog",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-6",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/careers",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-7",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/terms-and-conditions",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    },
+    {
+      "step_id": "open-8",
+      "action": "goto",
+      "destination": {
+        "url": "https://somatiq.ai/privacy-policy",
+        "query": []
+      },
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 20000
+    }
+  ],
+  "capture": {
+    "after_each_step": [
+      "url",
+      "accessibility"
+    ],
+    "at_end": [
+      "url",
+      "accessibility",
+      "screenshot"
+    ],
+    "events": [
+      "network",
+      "console",
+      "page-errors",
+      "popups",
+      "downloads"
+    ],
+    "network": {
+      "request_body": false,
+      "response_body": false,
+      "header_values": false
+    }
+  }
+}

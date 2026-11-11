@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+server/data/
+coverage/
+*.log
+docs/rea-evidence/*.png
+docs/rea-evidence/somatiq-*.json
+docs/rea-evidence/clicks.json
+docs/rea-evidence/login.json
+docs/rea-evidence/radlinq.json
+docs/rea-evidence/ris-public.json
+docs/rea-evidence/summary.txt

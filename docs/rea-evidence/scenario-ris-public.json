@@ -1,0 +1,51 @@
+{
+  "browser": {
+    "mode": "launch",
+    "executable_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "headless": true
+  },
+  "environment": {
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "device_scale_factor": 1
+    },
+    "locale": "en-US",
+    "timezone": "Asia/Kolkata",
+    "color_scheme": "light",
+    "reduced_motion": "no-preference",
+    "service_workers": "block"
+  },
+  "capture": {
+    "after_each_step": [
+      "url",
+      "accessibility"
+    ],
+    "at_end": [
+      "url",
+      "accessibility",
+      "screenshot"
+    ],
+    "events": [
+      "network",
+      "popups",
+      "page-errors"
+    ],
+    "network": {
+      "request_body": false,
+      "response_body": false,
+      "header_values": false
+    }
+  },
+  "start_url": {
+    "url": "https://ris.somatiq.ai/",
+    "query": []
+  },
+  "actions": [
+    {
+      "step_id": "settle-login",
+      "action": "wait_for_timeout",
+      "duration_ms": 2500
+    }
+  ]
+}
