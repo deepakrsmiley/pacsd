@@ -5,28 +5,51 @@ import { orthancBytes, orthancConfigured, orthancJson, orthancText } from "./ort
 
 const CURSOR_KEY = "changes";
 const BACKFILL_LIMIT = 40;
+const CHANGES_PAGE = 50;
+const CHANGES_PER_SYNC = 100;
+
+const listedStudies = new Set();
 
 export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
   if (!orthancConfigured()) return { skipped: true };
+  const studyIds = (await orthancJson("/studies", {}, fetchImpl)) || [];
+  await listNewStudies(studyIds, fetchImpl);
   const cursor = await OrthancCursor.findOne({ key: CURSOR_KEY });
   let since = cursor?.lastSeq || 0;
   let last = since;
+  let processed = 0;
   for (;;) {
-    const page = await orthancJson(`/changes?since=${since}&limit=100`, {}, fetchImpl);
+    const page = await orthancJson(`/changes?since=${since}&limit=${CHANGES_PAGE}`, {}, fetchImpl);
     for (const change of page.Changes || []) {
       if (change.ChangeType === "NewInstance") await importOrthancInstance(change.ID, fetchImpl);
     }
+    processed += (page.Changes || []).length;
     last = Number.isFinite(page.Last) ? page.Last : since;
-    if (page.Done !== false || last === since) break;
+    await OrthancCursor.findOneAndUpdate({ key: CURSOR_KEY }, { key: CURSOR_KEY, lastSeq: last }, { upsert: true });
+    if (page.Done !== false || last === since || processed >= CHANGES_PER_SYNC) break;
     since = last;
   }
-  await OrthancCursor.findOneAndUpdate({ key: CURSOR_KEY }, { key: CURSOR_KEY, lastSeq: last }, { upsert: true });
-  await reconcileMissingStudies(fetchImpl);
+  await reconcileMissingStudies(studyIds, fetchImpl);
   return { lastSeq: last };
 }
 
-async function reconcileMissingStudies(fetchImpl) {
-  const studyIds = await orthancJson("/studies", {}, fetchImpl);
+async function listNewStudies(studyIds, fetchImpl) {
+  for (const studyId of studyIds) {
+    if (listedStudies.has(studyId)) continue;
+    const info = await orthancJson(`/studies/${studyId}`, {}, fetchImpl);
+    const uid = info?.MainDicomTags?.StudyInstanceUID || "";
+    if (!uid) continue;
+    const existing = await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }] }).select("_id");
+    if (!existing) {
+      const instances = await orthancJson(`/studies/${studyId}/instances`, {}, fetchImpl);
+      if (!instances?.[0]?.ID) continue;
+      await importOrthancInstance(instances[0].ID, fetchImpl);
+    }
+    listedStudies.add(studyId);
+  }
+}
+
+async function reconcileMissingStudies(studyIds, fetchImpl) {
   let imported = 0;
   const remainder = [];
   for (const studyId of studyIds || []) {
