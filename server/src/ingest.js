@@ -4,6 +4,7 @@ import path from "node:path";
 import { ageTokenFromName, normalizeAgeToken, sexFromName } from "../../shared/reportDocument.js";
 import { dataDir } from "./config.js";
 import { parseDicomBuffer } from "./dicom.js";
+import { publishStudyChange } from "./liveEvents.js";
 import { Instance, Patient, Series, Study, TransferJob } from "./models.js";
 import { storeInOrthanc } from "./notify.js";
 
@@ -56,6 +57,7 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
     if (!study) {
       study = await Study.findOne({ facilityId, accession });
     }
+    const createdStudy = !study;
     if (!study) {
       study = await Study.create({
         patientId: patient._id,
@@ -158,6 +160,7 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
       bytes: buffer.length,
       durationMs: Date.now() - started,
     });
+    publishStudyChange(facilityId, study._id, createdStudy ? "study.created" : "study.updated");
     return { instanceId: instance._id, patientId: patient._id, studyId: study._id, sopUid: parsed.sopUid };
   } catch (error) {
     await TransferJob.create({

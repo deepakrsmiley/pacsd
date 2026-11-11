@@ -18,6 +18,7 @@ export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
   let since = cursor?.lastSeq || 0;
   let last = since;
   let processed = 0;
+  let more = false;
   for (;;) {
     const page = await orthancJson(`/changes?since=${since}&limit=${CHANGES_PAGE}`, {}, fetchImpl);
     for (const change of page.Changes || []) {
@@ -26,11 +27,15 @@ export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
     processed += (page.Changes || []).length;
     last = Number.isFinite(page.Last) ? page.Last : since;
     await OrthancCursor.findOneAndUpdate({ key: CURSOR_KEY }, { key: CURSOR_KEY, lastSeq: last }, { upsert: true });
-    if (page.Done !== false || last === since || processed >= CHANGES_PER_SYNC) break;
+    if (page.Done !== false || last === since) break;
+    if (processed >= CHANGES_PER_SYNC) {
+      more = true;
+      break;
+    }
     since = last;
   }
   await reconcileMissingStudies(studyIds, fetchImpl);
-  return { lastSeq: last };
+  return { lastSeq: last, more };
 }
 
 async function listNewStudies(studyIds, fetchImpl) {
@@ -85,7 +90,23 @@ async function defaultFacilityId() {
   return first?._id || null;
 }
 
-async function importOrthancInstance(orthancId, fetchImpl) {
+let importQueue = Promise.resolve();
+
+function importOrthancInstance(orthancId, fetchImpl) {
+  const run = importQueue.then(() => importInstanceNow(orthancId, fetchImpl));
+  importQueue = run.catch(() => {});
+  return run;
+}
+
+export async function importNotifiedInstance(orthancId) {
+  try {
+    await importOrthancInstance(orthancId);
+  } finally {
+    kickOrthancSync();
+  }
+}
+
+async function importInstanceNow(orthancId, fetchImpl) {
   const already = await Instance.findOne({ orthancId }).select("_id");
   if (already) return;
   let aeTitle = "";
@@ -146,28 +167,40 @@ async function importOrthancInstance(orthancId, fetchImpl) {
 
 let timer;
 let inFlight = false;
+let rerun = false;
 let lastError = "";
+
+function tick() {
+  if (inFlight) {
+    rerun = true;
+    return;
+  }
+  inFlight = true;
+  rerun = false;
+  syncOrthancOnce()
+    .then((result) => {
+      if (lastError) console.log("Orthanc sync resumed");
+      lastError = "";
+      if (result?.more) rerun = true;
+    })
+    .catch((error) => {
+      if (error.message !== lastError) {
+        console.error(`Orthanc sync failed: ${error.message}`);
+        lastError = error.message;
+      }
+    })
+    .finally(() => {
+      inFlight = false;
+      if (rerun) tick();
+    });
+}
+
+export function kickOrthancSync() {
+  if (timer) tick();
+}
 
 export function startOrthancPoller() {
   if (!orthancConfigured() || timer) return;
-  const tick = () => {
-    if (inFlight) return;
-    inFlight = true;
-    syncOrthancOnce()
-      .then(() => {
-        if (lastError) console.log("Orthanc sync resumed");
-        lastError = "";
-      })
-      .catch((error) => {
-        if (error.message !== lastError) {
-          console.error(`Orthanc sync failed: ${error.message}`);
-          lastError = error.message;
-        }
-      })
-      .finally(() => {
-        inFlight = false;
-      });
-  };
   timer = setInterval(tick, 10000);
   if (typeof timer.unref === "function") timer.unref();
   tick();

@@ -20,6 +20,8 @@ import { registerDictation } from "./dictation/routes.js";
 import { registerDicomweb } from "./dicomweb.js";
 import { registerEnterprise } from "./enterprise.js";
 import { ingestDicomBuffer } from "./ingest.js";
+import { subscribeStudyChanges } from "./liveEvents.js";
+import { importNotifiedInstance } from "./orthancSync.js";
 import {
   AuditLog,
   Facility,
@@ -254,6 +256,39 @@ export function createApp() {
       service: "pacsd",
       database: database ? "connected" : "unavailable",
       storage: storage ? "writable" : "unavailable",
+    });
+  });
+
+  app.post("/api/orthanc/notify", (req, res) => {
+    const expected = String(process.env.ORTHANC_WEBHOOK_TOKEN || "");
+    if (!expected) return res.status(404).json({ error: "Not found" });
+    const given = String(req.get("x-pacsd-token") || "");
+    const valid = given.length === expected.length
+      && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+    if (!valid) return res.status(401).json({ error: "Invalid token" });
+    const instanceId = String(req.body?.instance || "");
+    if (!/^[0-9a-f-]{8,64}$/i.test(instanceId)) return res.status(400).json({ error: "Invalid input" });
+    importNotifiedInstance(instanceId).catch((error) => console.error(`Orthanc notify import failed: ${error.message}`));
+    res.status(202).json({ accepted: true });
+  });
+
+  app.get("/api/events", requireUser, (req, res) => {
+    res.set({
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+    res.flushHeaders();
+    res.write("retry: 3000\n\n");
+    const stop = subscribeStudyChanges((event) => {
+      if (!canAccessFacility(req.user, event.facilityId)) return;
+      res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    });
+    const ping = setInterval(() => res.write(": ping\n\n"), 25000);
+    req.on("close", () => {
+      clearInterval(ping);
+      stop();
     });
   });
 

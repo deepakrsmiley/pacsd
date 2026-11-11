@@ -256,6 +256,18 @@ describe("Orthanc ingest", () => {
     expect((await OrthancCursor.findOne({ key: "changes" })).lastSeq).toBe(3);
   });
 
+  it("accepts Orthanc store notifications only with the shared token", async () => {
+    expect((await request(app).post("/api/orthanc/notify").send({ instance: "abcdef12-34" })).status).toBe(404);
+    process.env.ORTHANC_WEBHOOK_TOKEN = "notify-secret-token";
+    try {
+      expect((await request(app).post("/api/orthanc/notify").send({ instance: "abcdef12-34" })).status).toBe(401);
+      expect((await request(app).post("/api/orthanc/notify").set("x-pacsd-token", "notify-secret-tokex").send({ instance: "abcdef12-34" })).status).toBe(401);
+      expect((await request(app).post("/api/orthanc/notify").set("x-pacsd-token", "notify-secret-token").send({ instance: "../system" })).status).toBe(400);
+    } finally {
+      delete process.env.ORTHANC_WEBHOOK_TOKEN;
+    }
+  });
+
   it("imports an Orthanc REST upload with no remote AE title into the first facility", async () => {
     const uploaded = buildSampleDicom({ patientId: "MRN-REST", accession: "ACC-REST", patientName: "Rest^Upload" });
     const sopUid = parseDicomBuffer(uploaded).sopUid;

@@ -69,6 +69,22 @@ export default function Worklist({ mode }) {
     api("/api/assignees").then((data) => setAssignees(data.users)).catch(() => setAssignees([]));
   }, [mode, facilityId, toasts]);
 
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return undefined;
+    const source = new EventSource("/api/events", { withCredentials: true });
+    let pending;
+    const refresh = () => {
+      clearTimeout(pending);
+      pending = setTimeout(() => load().catch(() => {}), 300);
+    };
+    source.addEventListener("study.created", refresh);
+    source.addEventListener("study.updated", refresh);
+    return () => {
+      clearTimeout(pending);
+      source.close();
+    };
+  }, [mode, facilityId]);
+
   async function assign(study, assignedTo) {
     try {
       await api(`/api/studies/${study._id}`, { method: "PATCH", body: { assignedTo: assignedTo || null } });
