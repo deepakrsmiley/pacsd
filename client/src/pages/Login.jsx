@@ -142,9 +142,6 @@ export default function Login() {
                   </form>
             </div>
           </div>
-          <footer className="border-t border-white/[0.08] px-6 py-4 text-xs leading-5 text-zinc-300 lg:px-12">
-            PACSD is a clinical workflow application and is not a certified diagnostic device.
-          </footer>
         </main>
       </div>
     </div>
