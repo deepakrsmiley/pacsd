@@ -147,6 +147,9 @@ export default function Workstation() {
   const volumeSelection = findVolumePreset(volumePresetId, customVolumes.map((item) => ({ ...item, preset: undefined, name: item.base, label: item.label, id: item.id })));
 
   useEffect(() => engine.subscribe(setSnapshot), [engine]);
+  useEffect(() => engine.setLoadErrorListener((message) => {
+    setError((current) => current || message || "The DICOM image could not be loaded");
+  }), [engine]);
 
   const destroyTimer = useRef(0);
   useEffect(() => {
@@ -199,7 +202,11 @@ export default function Workstation() {
       setSlotSeries(Array.from({ length: 4 }, () => first));
       setActiveSlot(0);
       setMode("stack");
-      setNotice(data.series?.length ? "" : "This study has no stored images.");
+      if (!data.series?.length) setNotice("This study has no stored images.");
+      else if (data.pixelsMissing) {
+        setNotice("Patient and study details are here, but the DICOM pixel files are missing from this computer and the archive. Re-upload the study or restore it from Orthanc to view images.");
+        setError("DICOM files are missing — the viewer cannot display this study until the images are restored.");
+      } else setNotice("");
     }).catch((err) => { if (!controller.signal.aborted) setError(err.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     api(`/api/viewer/studies/${studyId}/annotations`).then((data) => {
@@ -207,6 +214,19 @@ export default function Workstation() {
     }).catch(() => { if (!controller.signal.aborted) setAnnotations([]); });
     return () => controller.abort();
   }, [studyId]);
+
+  const importing = Boolean(catalog && catalog.archiveInstances > catalog.storedInstances);
+  useEffect(() => {
+    if (!studyId || !importing) return undefined;
+    const timer = setInterval(() => {
+      api(`/api/viewer/studies/${studyId}/catalog`).then((data) => {
+        setCatalog((current) => (
+          current?.study?._id === data.study?._id && current.storedInstances !== data.storedInstances ? data : current
+        ));
+      }).catch(() => {});
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [studyId, importing]);
 
   useEffect(() => {
     const studyUid = catalog?.study?.studyUid;
@@ -259,6 +279,10 @@ export default function Workstation() {
       const chosen = placed[index] || activeSeries;
       return { imageIds: seriesImageIds(chosen), index: 0, seriesId: chosen._id };
     });
+    if (catalog.pixelsMissing || slots.every((slot) => !slot.imageIds.length)) {
+      setError("DICOM files are missing — the viewer cannot display this study until the images are restored.");
+      return undefined;
+    }
     const metadata = placed.flatMap((item) => metadataEntries(catalog.study, item));
     if (!metadata.length) metadata.push(...metadataEntries(catalog.study, activeSeries));
     setImageMetadata(metadata);
@@ -266,6 +290,7 @@ export default function Workstation() {
       ? MPR_ORIENTATIONS
       : [mode === "projection" ? Enums.OrientationAxis.AXIAL : Enums.OrientationAxis.CORONAL];
     let cancel = false;
+    setError("");
     engine.show({
       elements,
       mode,
@@ -586,6 +611,7 @@ export default function Workstation() {
             disabled={!activeSeries}
           />
           {loading && <p className="bg-[#1c1c21] px-3 py-1 text-[12px] text-[#c4b5fd]">Loading DICOM geometry…</p>}
+          {importing && <p className="bg-[#1c1c21] px-3 py-1 text-[12px] text-[#c4b5fd]">Importing images from the archive: {catalog.storedInstances} of {catalog.archiveInstances}…</p>}
           {error && <p className="bg-[#3a2412] px-3 py-1 text-[12px] text-amber-100" role="alert">{error}</p>}
           {notice && <p className="bg-[#3a2412] px-3 py-1 text-[12px] text-amber-100">{notice}</p>}
           <DicomViewport

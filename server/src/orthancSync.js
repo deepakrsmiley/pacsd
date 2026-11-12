@@ -4,7 +4,8 @@ import { ingestDicomBuffer } from "./ingest.js";
 import { orthancBytes, orthancConfigured, orthancJson, orthancText } from "./orthancClient.js";
 
 const CURSOR_KEY = "changes";
-const BACKFILL_LIMIT = 40;
+const BACKFILL_LIMIT = 300;
+const IMPORT_CONCURRENCY = 6;
 const CHANGES_PAGE = 50;
 const CHANGES_PER_SYNC = 100;
 
@@ -34,7 +35,7 @@ export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
     }
     since = last;
   }
-  await reconcileMissingStudies(studyIds, fetchImpl);
+  if (await reconcileMissingStudies(studyIds, fetchImpl)) more = true;
   return { lastSeq: last, more };
 }
 
@@ -55,32 +56,84 @@ async function listNewStudies(studyIds, fetchImpl) {
 }
 
 async function reconcileMissingStudies(studyIds, fetchImpl) {
-  let imported = 0;
-  const remainder = [];
+  let budget = BACKFILL_LIMIT;
   for (const studyId of studyIds || []) {
-    const info = await orthancJson(`/studies/${studyId}`, {}, fetchImpl);
-    const uid = info?.MainDicomTags?.StudyInstanceUID || "";
-    const instances = await orthancJson(`/studies/${studyId}/instances`, {}, fetchImpl);
-    const existing = uid
-      ? await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }] }).select("_id")
-      : null;
-    if (!existing && instances?.[0]?.ID) {
-      await importOrthancInstance(instances[0].ID, fetchImpl);
-      imported += 1;
-      remainder.push(...instances.slice(1));
-      continue;
+    if (budget <= 0) return true;
+    budget -= await backfillOrthancStudy(studyId, budget, fetchImpl);
+  }
+  return budget <= 0;
+}
+
+async function mapPool(items, limit, worker) {
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const item = items[cursor];
+      cursor += 1;
+      await worker(item);
     }
-    if (!existing) continue;
-    const count = await Instance.countDocuments({ studyId: existing._id });
-    if (count < (instances || []).length) remainder.push(...instances);
   }
-  for (const instance of remainder) {
-    if (imported >= BACKFILL_LIMIT) break;
-    const orthancId = instance.ID || instance;
-    const already = await Instance.findOne({ orthancId }).select("_id");
-    await importOrthancInstance(orthancId, fetchImpl);
-    if (!already) imported += 1;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+}
+
+async function importQuietly(orthancId, fetchImpl) {
+  try {
+    await importInstanceNow(orthancId, fetchImpl);
+  } catch {
+    // The transfer log records the rejection and the next pass retries it.
   }
+}
+
+const studyBackfills = new Map();
+
+// The first image of each series goes through the queue so the study and series
+// rows exist before the rest of that series is pulled in parallel.
+function backfillOrthancStudy(orthancStudyId, limit, fetchImpl) {
+  if (studyBackfills.has(orthancStudyId)) return studyBackfills.get(orthancStudyId).then(() => 0);
+  const job = (async () => {
+    const instances = (await orthancJson(`/studies/${orthancStudyId}/instances`, {}, fetchImpl)) || [];
+    const ids = instances.map((item) => item.ID).filter(Boolean);
+    const known = new Set((await Instance.find({ orthancId: { $in: ids } }).select("orthancId")).map((item) => item.orthancId));
+    const pending = instances.filter((item) => item.ID && !known.has(item.ID)).slice(0, limit);
+    const bySeries = new Map();
+    for (const item of pending) {
+      const key = item.ParentSeries || "";
+      if (!bySeries.has(key)) bySeries.set(key, []);
+      bySeries.get(key).push(item.ID);
+    }
+    const groups = [...bySeries.values()];
+    for (const group of groups) {
+      await importOrthancInstance(group[0], fetchImpl).catch(() => {});
+    }
+    await mapPool(groups.flatMap((group) => group.slice(1)), IMPORT_CONCURRENCY, (id) => importQuietly(id, fetchImpl));
+    return pending.length;
+  })().finally(() => studyBackfills.delete(orthancStudyId));
+  studyBackfills.set(orthancStudyId, job);
+  return job;
+}
+
+async function orthancStudyIdFor(studyUid) {
+  const matches = await orthancJson("/tools/lookup", { method: "POST", body: studyUid, timeoutMs: 5000 });
+  return (matches || []).find((item) => item.Type === "Study")?.ID || "";
+}
+
+export async function archiveImageCount(studyUid) {
+  if (!orthancConfigured() || !studyUid) return 0;
+  try {
+    const id = await orthancStudyIdFor(studyUid);
+    if (!id) return 0;
+    const stats = await orthancJson(`/studies/${id}/statistics`, { timeoutMs: 5000 });
+    return Number(stats?.CountInstances) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function backfillStudyByUid(studyUid) {
+  if (!orthancConfigured()) return 0;
+  const id = await orthancStudyIdFor(studyUid);
+  if (!id) return 0;
+  return backfillOrthancStudy(id, Number.POSITIVE_INFINITY);
 }
 
 async function defaultFacilityId() {
@@ -152,7 +205,10 @@ async function importInstanceNow(orthancId, fetchImpl) {
   const existing = await Instance.findOne({ sopUid: parsed.sopUid }).select("studyId");
   if (existing) {
     const study = await Study.findById(existing.studyId).select("facilityId");
-    if (study && String(study.facilityId) === String(facilityId)) return;
+    if (study && String(study.facilityId) === String(facilityId)) {
+      await Instance.updateOne({ _id: existing._id }, { orthancId });
+      return;
+    }
     const prior = await TransferJob.findOne({ source: "orthanc", fileName: `${orthancId}.dcm`, status: "rejected" });
     if (prior) return;
   }

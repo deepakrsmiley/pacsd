@@ -3,9 +3,12 @@ import { z } from "zod";
 import { sortInstances, volumeAssessment } from "../../shared/dicomGeometry.js";
 import { readSpatialTags } from "./dicom.js";
 import { Instance, Series, Study, ViewerAnnotation, ViewerPreference } from "./models.js";
+import { localDicomPath } from "./dicomFiles.js";
 import { orthancConfigured, orthancFetch } from "./orthancClient.js";
+import { archiveImageCount, backfillStudyByUid } from "./orthancSync.js";
 
 const UID = /^[0-9]+(?:\.[0-9]+)*$/;
+const MISSING_FILE = "The DICOM file is missing from storage and the archive. Upload the study again.";
 
 function safeUid(value) {
   const uid = String(value || "").trim();
@@ -113,7 +116,12 @@ async function ensureGeometry(instance) {
   return instance;
 }
 
+function fileOnDisk(instance) {
+  return Boolean(instance.filePath && fs.existsSync(instance.filePath));
+}
+
 function publicInstance(instance) {
+  const available = fileOnDisk(instance);
   return {
     _id: instance._id,
     sopUid: instance.sopUid,
@@ -140,7 +148,8 @@ function publicInstance(instance) {
     transferSyntax: instance.transferSyntax || "",
     manufacturer: instance.manufacturer || "",
     institution: instance.institution || "",
-    hasArchiveCopy: Boolean(instance.orthancId),
+    fileAvailable: available,
+    hasArchiveCopy: available || Boolean(instance.orthancId),
   };
 }
 
@@ -252,15 +261,15 @@ export function registerDicomweb(app, { requireUser, requirePermission, wrap, au
   app.get("/api/dicomweb/studies/:studyUid/series/:seriesUid/instances/:sopUid", ...read, wrap(async (req, res) => {
     const loaded = await loadInstanceByUid(req, loadReadableStudy);
     if (loaded.error) return res.status(loaded.status).json({ error: loaded.error });
-    const sent = sendLocalDicom(req, res, loaded.instance.filePath, dicomEtag(loaded.instance));
-    if (!sent) return res.status(404).json({ error: "DICOM file is not available" });
+    const sent = sendLocalDicom(req, res, await localDicomPath(loaded.instance), dicomEtag(loaded.instance));
+    if (!sent) return res.status(404).json({ error: MISSING_FILE });
   }));
 
   app.get("/api/dicomweb/instances/:id/file", ...read, wrap(async (req, res) => {
     const loaded = await loadInstanceById(req, loadReadableStudy);
     if (loaded.error) return res.status(loaded.status).json({ error: loaded.error });
-    const sent = sendLocalDicom(req, res, loaded.instance.filePath, dicomEtag(loaded.instance));
-    if (!sent) return res.status(404).json({ error: "DICOM file is not available" });
+    const sent = sendLocalDicom(req, res, await localDicomPath(loaded.instance), dicomEtag(loaded.instance));
+    if (!sent) return res.status(404).json({ error: MISSING_FILE });
   }));
 
   app.get("/api/dicomweb/studies/:studyUid/series/:seriesUid/orthanc/metadata", ...read, wrap(async (req, res) => {
@@ -307,10 +316,17 @@ export function registerDicomweb(app, { requireUser, requirePermission, wrap, au
       const bucket = bySeries.get(String(instance.seriesId));
       if (bucket) bucket.push(instance);
     }
+    const availableCount = instances.filter(fileOnDisk).length;
+    const archiveCount = await archiveImageCount(study.studyUid);
+    if (archiveCount > instances.length) backfillStudyByUid(study.studyUid).catch(() => {});
     await audit(req, "dicom.catalog", "study", study._id, study.facilityId, { series: series.length, instances: instances.length });
     res.json({
       source: "local-dicom",
       orthancConfigured: orthancConfigured(),
+      storedInstances: instances.length,
+      availableInstances: availableCount,
+      archiveInstances: archiveCount,
+      pixelsMissing: availableCount === 0 && archiveCount === 0 && instances.length > 0,
       annotationStandard: "application-json",
       dicomSr: false,
       patient: {

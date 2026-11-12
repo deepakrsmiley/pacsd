@@ -34,6 +34,7 @@ import {
   User,
 } from "./models.js";
 import { integrationStatus, normalizePhone, orthancPreview, requestReportAssist, sendReportEmail, sendWhatsApp, sendWhatsAppDocument, whatsappConfigured, whatsappWebUrl } from "./notify.js";
+import { localDicomPath } from "./dicomFiles.js";
 import { orthancBytes, orthancSystem } from "./orthancClient.js";
 import { can, canAccessFacility, facilityIdsOf, ROLES } from "./permissions.js";
 import { DOC_FORMAT, SECTION_KEYS, extractSections, finalizationProblems, isDocNode, normalizeLayout } from "../../shared/reportDocument.js";
@@ -651,7 +652,9 @@ export function createApp() {
     if (!instance) return res.status(404).json({ error: "Instance not found" });
     const study = await loadReadableStudy(req, instance.studyId);
     if (!study) return res.status(404).json({ error: "Instance not found" });
-    res.json({ tags: dicomTagSummary(fs.readFileSync(instance.filePath)) });
+    const filePath = await localDicomPath(instance);
+    if (!filePath) return res.status(404).json({ error: "The DICOM file is missing from storage and the archive" });
+    res.json({ tags: dicomTagSummary(await fs.promises.readFile(filePath)) });
   }));
 
   app.get("/api/dashboard", requireUser, requirePermission("dashboard.read"), wrap(async (req, res) => {
@@ -1153,7 +1156,9 @@ async function loadInstancePixels(req) {
   if (!instance) return { status: 404, error: "Instance not found" };
   const study = await loadReadableStudy(req, instance.studyId);
   if (!study) return { status: 404, error: "Instance not found" };
-  const parsed = parseDicomBuffer(fs.readFileSync(instance.filePath));
+  const filePath = await localDicomPath(instance);
+  if (!filePath) return { status: 404, error: "The DICOM file is missing from storage and the archive" };
+  const parsed = parseDicomBuffer(await fs.promises.readFile(filePath));
   const frame = Number.isFinite(Number(req.query.frame)) ? Math.max(0, Math.trunc(Number(req.query.frame))) : 0;
   const samples = parsed.samplesPerPixel || 1;
   const frames = parsed.numberOfFrames || 1;

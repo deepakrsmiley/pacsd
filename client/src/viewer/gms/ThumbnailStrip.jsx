@@ -35,7 +35,9 @@ const SliceThumb = memo(function SliceThumb({ frame, active, onPick, ready }) {
   const ref = useRef(null);
   const [show, setShow] = useState(false);
   const [failed, setFailed] = useState(false);
-  const src = frame.instance?.hasArchiveCopy ? `/api/instances/${frame.instance._id}/orthanc-preview` : "";
+  const src = frame.instance?.fileAvailable && frame.instance?.hasArchiveCopy
+    ? `/api/instances/${frame.instance._id}/orthanc-preview`
+    : "";
 
   useEffect(() => {
     const node = ref.current;

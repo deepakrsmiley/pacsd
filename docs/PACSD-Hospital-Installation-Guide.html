@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PACSD – Hospital Installation Guide (Orthanc, Tailscale, GE CT)</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", -apple-system, Arial, sans-serif; color: #1d1d1f; font-size: 10.3pt; line-height: 1.55; margin: 0; }
+  .cover { border-radius: 16px; background: linear-gradient(135deg, #1c1c21, #3b1d7a); color: #fff; padding: 30px 30px; margin-bottom: 20px; }
+  .cover small { color: #c4b5fd; letter-spacing: .05em; font-weight: 600; }
+  .cover h1 { margin: 8px 0 6px; font-size: 23pt; }
+  .cover p { margin: 0; color: #d4d4d8; }
+  h2 { font-size: 14.5pt; color: #3b1d7a; border-bottom: 2px solid #ede9fe; padding-bottom: 4px; margin: 24px 0 10px; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 16px 0 6px; page-break-after: avoid; }
+  ol, ul { padding-left: 22px; margin: 6px 0; }
+  li { margin: 4px 0; }
+  code { font-family: Consolas, monospace; background: #f4f4f5; padding: 1px 5px; border-radius: 5px; font-size: 9.3pt; word-break: break-all; }
+  pre { background: #18181b; color: #e4e4e7; padding: 10px 14px; border-radius: 10px; font-size: 9.3pt; white-space: pre-wrap; page-break-inside: avoid; margin: 6px 0; }
+  pre code { background: none; color: inherit; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 9.6pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #e4e4e7; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #f5f3ff; }
+  .note { background: #f5f3ff; border-left: 4px solid #7c3aed; padding: 9px 13px; border-radius: 8px; margin: 10px 0; page-break-inside: avoid; }
+  .warn { background: #fff7ed; border-left: 4px solid #ea580c; padding: 9px 13px; border-radius: 8px; margin: 10px 0; page-break-inside: avoid; }
+  .ok { background: #f0fdf4; border-left: 4px solid #16a34a; padding: 9px 13px; border-radius: 8px; margin: 10px 0; page-break-inside: avoid; }
+  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 14px; }
+  .box { border: 1.5px solid #7c3aed; border-radius: 10px; padding: 6px 10px; background: #faf5ff; font-weight: 600; font-size: 9.3pt; }
+  .arrow { color: #7c3aed; font-weight: 700; font-size: 9pt; }
+  .toc li { margin: 2px 0; }
+  .page-break { page-break-before: always; }
+  .blank { display: inline-block; min-width: 220px; border-bottom: 1px solid #a1a1aa; height: 1.1em; }
+  .check td:first-child { width: 28px; text-align: center; font-size: 12pt; }
+  .footer { margin-top: 28px; color: #71717a; font-size: 8.5pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <small>GALACTIC MEDICAL SYSTEMS · PACSD</small>
+  <h1>Hospital Installation Guide</h1>
+  <p>Connecting Orthanc, Tailscale and the GE CT scanner to https://pacsd.onrender.com</p>
+</div>
+
+<h2>How the system fits together</h2>
+<div class="flow">
+  <span class="box">GE CT console</span><span class="arrow">→ DICOM, port 4242 (hospital LAN) →</span>
+  <span class="box">Orthanc PC + Tailscale</span><span class="arrow">→ HTTPS + password (Funnel) →</span>
+  <span class="box">pacsd.onrender.com</span><span class="arrow">→</span>
+  <span class="box">Worklist / Viewer</span>
+</div>
+<p>PACSD on Render checks Orthanc every 10 seconds through the Tailscale address and imports any new images. Test the whole chain from <strong>your own PC</strong> first (Parts A to E). Then repeat the setup on a PC at the hospital and point the scanners at it (Part F). No scanner is needed for testing, because you can upload a DICOM file into Orthanc yourself.</p>
+
+<ol class="toc">
+  <li>Part A: Prepare PACSD</li>
+  <li>Part B: Install Orthanc on the Windows PC</li>
+  <li>Part C: Tailscale Funnel, including which account to use</li>
+  <li>Part D: Connect Render to Orthanc</li>
+  <li>Part E: Test without a scanner</li>
+  <li>Part F: At the hospital (real scanners)</li>
+  <li>Part G: GE CT console configuration (AE title, IP, port)</li>
+  <li>Part H: Register the CT in PACSD (DICOM Nodes)</li>
+  <li>Troubleshooting, reminders and site worksheet</li>
+</ol>
+
+<h2>Part A: Prepare PACSD (5 minutes)</h2>
+<ol>
+  <li>Sign in at <code>https://pacsd.onrender.com</code>. Go to <strong>Users and Roles</strong> and create at least one <strong>facility</strong> (hospital). <strong>Without a facility, incoming images are rejected.</strong></li>
+  <li>Make sure <code>PUBLIC_BASE_URL</code> and <code>WEB_ORIGIN</code> in Render are set to <code>https://pacsd.onrender.com</code>.</li>
+</ol>
+
+<h2>Part B: Install Orthanc on the Windows PC</h2>
+<ol>
+  <li>Download the <strong>Windows 64-bit installer</strong> from <code>orthanc.uclouvain.be/downloads</code>, install it with default options, and choose to run it as a service.</li>
+  <li>Open <strong>Notepad as Administrator</strong> and open <code>C:\Program Files\Orthanc Server\Configuration\orthanc.json</code>.</li>
+  <li>Find and change these lines. They already exist; just edit the values:
+<pre><code>"Name" : "GMS PACS",
+"DicomAet" : "GMSPACS",
+"DicomPort" : 4242,
+"RemoteAccessAllowed" : true,
+"AuthenticationEnabled" : true,
+"RegisteredUsers" : {
+  "pacsd" : "Use-A-Long-Orthanc-Password-2026"
+},</code></pre>
+  Pick your own password. Save the file.</li>
+  <li>Press <code>Win + R</code>, type <code>services.msc</code>, find <strong>Orthanc</strong>, and click <strong>Restart</strong>.</li>
+  <li>Open <code>http://localhost:8042</code> in a browser and sign in as <code>pacsd</code> with your password. The <strong>Orthanc Explorer</strong> page should appear.</li>
+  <li>Open the DICOM port to the local network. In <strong>PowerShell as Administrator</strong>:
+<pre><code>New-NetFirewallRule -DisplayName "Orthanc DICOM 4242" -Direction Inbound -Protocol TCP -LocalPort 4242 -Action Allow -Profile Private,Domain</code></pre></li>
+</ol>
+
+<h3>How to confirm Orthanc's AE title, port and IP</h3>
+<ul>
+  <li>Open <code>http://localhost:8042/system</code> and sign in as <code>pacsd</code>. It shows:
+<pre><code>"DicomAet" : "GMSPACS",
+"DicomPort" : 4242,
+"Name" : "GMS PACS"</code></pre>
+  <code>DicomAet</code> is the AE title you type on the CT. If it shows <code>ORTHANC</code> (the default), your edit to <code>orthanc.json</code> was not saved or the service was not restarted.</li>
+  <li><strong>IP address:</strong> open Command Prompt and run <code>ipconfig</code>. Use the <strong>IPv4 Address</strong> of the hospital network adapter (for example <code>192.168.1.50</code>), not the Tailscale adapter (100.x.x.x).</li>
+</ul>
+
+<div class="page-break"></div>
+<h2>Part C: Give Render a secure path to Orthanc (Tailscale Funnel)</h2>
+
+<h3>Which account to use for Tailscale</h3>
+<div class="note">
+  <p style="margin:0 0 6px"><strong>Use one company account owned by Galactic Medical Systems for every hospital,</strong> for example a dedicated Google or Microsoft account such as <code>gms.pacs@gmail.com</code> or your company Microsoft 365 account. Keep this login with GMS.</p>
+  <ul style="margin:0">
+    <li><strong>Do not</strong> sign in with a hospital employee's personal account. If that person leaves, you lose access and the connection.</li>
+    <li><strong>Do not</strong> use your personal account either. Use a company account that can be handed over.</li>
+    <li>All hospital Orthanc PCs join the same Tailscale network (tailnet), so you manage every site from one admin console.</li>
+    <li>Turn on two-step verification for this account.</li>
+  </ul>
+</div>
+<p><strong>Install Tailscale only on the Orthanc PC.</strong> The CT scanner, the doctors' computers and Render do not need it.</p>
+
+<h3>Steps</h3>
+<ol>
+  <li>Install <strong>Tailscale for Windows</strong> from <code>tailscale.com/download/windows</code> and sign in with the <strong>GMS company account</strong> described above.</li>
+  <li>Click the Tailscale icon in the taskbar tray and enable <strong>Run unattended</strong> (under Preferences). This keeps it running after a reboot or when nobody is logged in.</li>
+  <li>Open the Tailscale admin console at <code>login.tailscale.com/admin</code>:
+    <ul>
+      <li>Under <strong>Machines</strong>, open this PC's <strong>...</strong> menu and choose <strong>Disable key expiry</strong>. Otherwise the connection stops after about 180 days.</li>
+      <li>In the same menu, choose <strong>Edit machine name</strong> and give it a clear name, for example <code>gh-orthanc</code>. The public address becomes <code>https://gh-orthanc.&lt;your-tailnet&gt;.ts.net</code>.</li>
+      <li>Under <strong>DNS</strong>, enable <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong>.</li>
+    </ul>
+  </li>
+  <li>In <strong>PowerShell as Administrator</strong>, run:
+<pre><code>tailscale funnel --bg 8042</code></pre>
+  The first time, it prints a link to approve Funnel for this PC. Open it, approve, then run the command again.</li>
+  <li>It prints your public address, for example:
+<pre><code>https://gh-orthanc.tail9f8e7.ts.net</code></pre>
+  You can show it again later with <code>tailscale funnel status</code>.</li>
+  <li>Test it from your <strong>phone on mobile data</strong>: open that address. It should ask for a username and password; sign in as <code>pacsd</code>. If Orthanc Explorer loads, the tunnel works.</li>
+</ol>
+
+<h2>Part D: Connect Render to Orthanc</h2>
+<ol>
+  <li>In Render, open <strong>pacsd</strong>, go to <strong>Environment</strong>, and add:
+  <table>
+    <tr><th>Key</th><th>Value</th></tr>
+    <tr><td><code>ORTHANC_URL</code></td><td><code>https://gh-orthanc.tail9f8e7.ts.net</code> (your address, no slash at the end)</td></tr>
+    <tr><td><code>ORTHANC_USERNAME</code></td><td><code>pacsd</code></td></tr>
+    <tr><td><code>ORTHANC_PASSWORD</code></td><td><code>Use-A-Long-Orthanc-Password-2026</code> (the password from Part B)</td></tr>
+  </table></li>
+  <li>Click <strong>Save</strong> and wait for the redeploy to show <strong>Live</strong>.</li>
+  <li>Check the Render <strong>Logs</strong>. You should <strong>not</strong> see <code>Orthanc sync failed</code>. In PACSD, open <strong>Integrations</strong> or <strong>System Health</strong>; Orthanc should show as reachable.</li>
+</ol>
+
+<h2>Part E: Test without a scanner</h2>
+<ol>
+  <li>Get any sample DICOM file (<code>.dcm</code>). Free samples are available online, or use a CD from any scan.</li>
+  <li>In <strong>Orthanc Explorer</strong> (<code>http://localhost:8042</code>), click <strong>Upload</strong>, drag the file in, and click <strong>Start the upload</strong>.</li>
+  <li>Wait about 10 to 20 seconds, then open PACSD's <strong>Imaging Worklist</strong>. The study should appear as <strong>Unassigned</strong> under your first facility.</li>
+  <li>Assign it to a radiologist and open it in the <strong>Viewer</strong>.</li>
+</ol>
+<div class="ok"><strong>If this works, the cloud connection is done.</strong> Everything after this is hospital setup.</div>
+
+<div class="page-break"></div>
+<h2>Part F: At the hospital (real scanners)</h2>
+<ol>
+  <li>Repeat <strong>Part B and Part C</strong> on a hospital PC with these requirements:
+    <ul>
+      <li><strong>On 24/7.</strong> Turn sleep off in PowerShell as Administrator:
+<pre><code>powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0</code></pre></li>
+      <li><strong>A fixed local IP</strong>, for example <code>192.168.1.50</code>. Ask the hospital IT team for a DHCP reservation or a static IP. If the IP changes, the CT can no longer send.</li>
+      <li>Ideally on a <strong>UPS</strong>, and on the <strong>same network</strong> as the CT scanner.</li>
+    </ul>
+  </li>
+  <li>Update <code>ORTHANC_URL</code> in Render to this PC's Tailscale address and wait for the redeploy.</li>
+  <li>Configure the GE CT (Part G) and register it in PACSD (Part H).</li>
+  <li>Press <strong>Echo / Verify</strong> on the scanner. It should succeed. Then send one test study and check that it appears in the Worklist.</li>
+</ol>
+
+<h2>Part G: GE CT console configuration</h2>
+<p>The CT needs to know where to send images: <strong>Orthanc's AE title, IP and port</strong>. Have the details from Part B ready (AE title from <code>/system</code>, IP from <code>ipconfig</code>).</p>
+
+<h3>Values to enter on the GE CT</h3>
+<table>
+  <tr><th>Field on GE console</th><th>Value</th><th>Where it comes from</th></tr>
+  <tr><td>Remote name / Host name</td><td><code>GMSPACS</code> (any label)</td><td>Your choice</td></tr>
+  <tr><td><strong>AE Title</strong></td><td><code>GMSPACS</code></td><td><code>"DicomAet"</code> in <code>orthanc.json</code> or <code>localhost:8042/system</code></td></tr>
+  <tr><td><strong>IP Address</strong></td><td><code>192.168.1.50</code></td><td><code>ipconfig</code> on the Orthanc PC (IPv4 of the hospital network)</td></tr>
+  <tr><td><strong>Port</strong></td><td><code>4242</code></td><td><code>"DicomPort"</code> in <code>orthanc.json</code></td></tr>
+  <tr><td>Type / Capability</td><td>Archive / Storage (Push / Send)</td><td>Allow sending images to it</td></tr>
+  <tr><td>Storage commitment</td><td>Off</td><td>Not needed</td></tr>
+</table>
+<div class="warn">The AE title must match <strong>exactly</strong>: capital letters, no spaces, 16 characters at most. <code>GMSPACS</code> and <code>gmspacs</code> are different.</div>
+
+<h3>Steps on the GE CT console</h3>
+<p>Menu names vary between GE models (Revolution, Optima, BrightSpeed, Discovery). The network configuration screen is often protected by a service password, so <strong>do this with the hospital's CT technologist or GE field engineer.</strong></p>
+<ol>
+  <li>On the CT console, open the <strong>Network / DICOM configuration</strong> screen. On many GE consoles this is under <strong>Utilities / Tools → Network Configuration → Remote Hosts</strong>, or in the Browser/Patient List as <strong>Network → Remote Hosts</strong>.</li>
+  <li>While you're on this screen, note the CT's own AE title, shown as <strong>Local / Host AE Title</strong> (for example <code>GECT_GH1</code>). You need it in Part H.</li>
+  <li>Click <strong>Add</strong> (new remote host) and enter the values from the table above.</li>
+  <li>Save the entry.</li>
+  <li>Select the new <code>GMSPACS</code> entry and press <strong>Verify / Ping / Echo</strong>. It should report <strong>success</strong>.</li>
+  <li>Optional: ask the technologist to set <code>GMSPACS</code> as an <strong>auto-send / auto-transfer</strong> destination after each exam, so studies are sent without a manual push.</li>
+  <li>Send one study manually: in the patient browser, select a study, choose <strong>Send / Push</strong>, and pick <code>GMSPACS</code>.</li>
+  <li>Confirm it arrives: it appears in Orthanc Explorer (<code>localhost:8042</code>) immediately, and in the PACSD Worklist within 10 to 20 seconds.</li>
+</ol>
+
+<h3>Finding the CT's AE title if nobody knows it</h3>
+<p>Send one study from the CT. In Orthanc Explorer, open the study, click an instance, and look at the <strong>RemoteAET</strong> metadata. Or open:</p>
+<pre><code>http://localhost:8042/instances/&lt;instance-id&gt;/metadata/RemoteAET</code></pre>
+<p>That value is the CT's AE title.</p>
+<div class="note">You don't need to add the CT inside Orthanc's configuration. Orthanc accepts images from any scanner by default, so registering the CT in PACSD (Part H) is enough.</div>
+
+<h2>Part H: Register the CT in PACSD (DICOM Nodes)</h2>
+<ol>
+  <li>Sign in to <code>https://pacsd.onrender.com</code> as the administrator.</li>
+  <li>In the <strong>Facility</strong> picker at the top, select the hospital (for example GH).</li>
+  <li>Open <strong>DICOM Nodes</strong> and click <strong>Add</strong>.</li>
+  <li>Fill in the form and save:
+  <table>
+    <tr><th>Field</th><th>Value</th></tr>
+    <tr><td>Node name</td><td><code>GE CT – GH</code></td></tr>
+    <tr><td><strong>AE title</strong></td><td>The CT's own AE title from Part G step 2, for example <code>GECT_GH1</code></td></tr>
+    <tr><td>Host</td><td>The CT's IP address on the hospital network (from the GE network screen)</td></tr>
+    <tr><td>Port</td><td>The CT's DICOM port (often <code>4006</code> or <code>104</code> on GE; leave <code>4242</code> if unknown)</td></tr>
+    <tr><td>Modality</td><td><code>CT</code></td></tr>
+  </table></li>
+  <li>Studies from that AE title now go to that hospital automatically. Repeat for every scanner (MR, X-ray, US and so on).</li>
+  <li>Under <strong>Users and Roles</strong>, add the radiologists to this facility so they can be assigned studies from the Worklist.</li>
+</ol>
+<div class="note">If you skip this step, PACSD auto-creates the node under the default facility. That's fine with one hospital, but every scanner must be registered under its own hospital once there are more. AE titles must also be unique across hospitals.</div>
+
+<div class="page-break"></div>
+<h2>If something goes wrong</h2>
+<table>
+  <tr><th>Problem</th><th>Likely cause and fix</th></tr>
+  <tr><td><code>localhost:8042</code> doesn't open</td><td>The Orthanc service isn't running, or there's a typo in <code>orthanc.json</code> (a missing comma). Check <code>services.msc</code>.</td></tr>
+  <tr><td><code>/system</code> shows AE title <code>ORTHANC</code></td><td>The <code>orthanc.json</code> edit wasn't saved (open Notepad as Administrator) or the service wasn't restarted.</td></tr>
+  <tr><td>The Tailscale address doesn't open from your phone</td><td>Funnel isn't approved, or HTTPS isn't enabled in the admin console. Run <code>tailscale funnel status</code>.</td></tr>
+  <tr><td>Render log shows "Orthanc rejected the archive credentials"</td><td>The username or password in Render doesn't match <code>orthanc.json</code>.</td></tr>
+  <tr><td>Render log shows "Orthanc is unavailable"</td><td>The PC is off or asleep, Tailscale is stopped, or <code>ORTHANC_URL</code> is wrong.</td></tr>
+  <tr><td>Images are in Orthanc but not in PACSD</td><td>No facility exists. Create one; already-sent studies are picked up on the next check.</td></tr>
+  <tr><td>The scanner's Echo fails</td><td>Windows firewall (Part B step 6), a wrong IP or port, a mismatched AE title, or the scanner is on a different network/VLAN. Ask IT to allow TCP 4242 from the CT to the Orthanc PC.</td></tr>
+  <tr><td>Echo works but the send fails</td><td>Check the Orthanc log (<code>C:\Program Files\Orthanc Server\Logs</code>) and that the PC's disk is not full.</td></tr>
+  <tr><td>Studies land in the wrong hospital</td><td>The CT's AE title is not registered in DICOM Nodes under the correct facility (Part H).</td></tr>
+</table>
+
+<h3>Two reminders</h3>
+<ul>
+  <li><strong>The free Render plan sleeps after 15 minutes.</strong> While it sleeps it doesn't fetch new images. They wait safely in Orthanc and are imported when someone opens PACSD. On a paid plan it fetches continuously.</li>
+  <li><strong>Add a Render Disk before real use</strong> (<code>DICOM_DIR=/var/data/dicom</code>). Otherwise PACSD's copy of the images is lost on restart. The originals stay in Orthanc, but the viewer needs PACSD's copy.</li>
+</ul>
+<p>When you reach Part D, send the Render log lines after the redeploy so the connection can be confirmed.</p>
+
+<h2>Site worksheet (fill in at the hospital)</h2>
+<table>
+  <tr><th style="width:42%">Item</th><th>Value</th></tr>
+  <tr><td>Hospital / facility name in PACSD</td><td><span class="blank"></span></td></tr>
+  <tr><td>Tailscale account used (GMS company account)</td><td><span class="blank"></span></td></tr>
+  <tr><td>Orthanc PC name / location</td><td><span class="blank"></span></td></tr>
+  <tr><td>Orthanc PC local IP (fixed)</td><td><span class="blank"></span></td></tr>
+  <tr><td>Orthanc AE title</td><td>GMSPACS</td></tr>
+  <tr><td>Orthanc DICOM port</td><td>4242</td></tr>
+  <tr><td>Orthanc username</td><td>pacsd</td></tr>
+  <tr><td>Tailscale Funnel address (ORTHANC_URL)</td><td><span class="blank"></span></td></tr>
+  <tr><td>GE CT model</td><td><span class="blank"></span></td></tr>
+  <tr><td>GE CT AE title (Local / Host AE)</td><td><span class="blank"></span></td></tr>
+  <tr><td>GE CT IP address</td><td><span class="blank"></span></td></tr>
+  <tr><td>Hospital IT contact / GE engineer</td><td><span class="blank"></span></td></tr>
+</table>
+
+<h3>Final checklist</h3>
+<table class="check">
+  <tr><td>☐</td><td>Facility created in PACSD; radiologists added</td></tr>
+  <tr><td>☐</td><td>Orthanc installed; <code>/system</code> shows AE title GMSPACS, port 4242</td></tr>
+  <tr><td>☐</td><td>Firewall rule for port 4242 added</td></tr>
+  <tr><td>☐</td><td>Tailscale signed in with the GMS account; Run unattended on; key expiry disabled</td></tr>
+  <tr><td>☐</td><td>Funnel address opens from a phone on mobile data</td></tr>
+  <tr><td>☐</td><td>Render <code>ORTHANC_URL</code>, <code>ORTHANC_USERNAME</code>, <code>ORTHANC_PASSWORD</code> set; no sync errors in logs</td></tr>
+  <tr><td>☐</td><td>Test upload in Orthanc Explorer appears in the PACSD Worklist</td></tr>
+  <tr><td>☐</td><td>GE CT remote host GMSPACS added; Echo succeeds</td></tr>
+  <tr><td>☐</td><td>CT AE title registered in PACSD DICOM Nodes under the hospital</td></tr>
+  <tr><td>☐</td><td>Real CT study sent and opened in the Viewer</td></tr>
+  <tr><td>☐</td><td>PC sleep disabled; fixed IP; UPS connected</td></tr>
+</table>
+
+<div class="footer">Galactic Medical Systems · PACSD Hospital Installation Guide · November 2026</div>
+</body>
+</html>

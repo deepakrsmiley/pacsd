@@ -1,6 +1,7 @@
 import { orientationMarkers } from "../../../shared/dicomGeometry.js";
 
 export function imageIdsFor(instance) {
+  if (instance && instance.fileAvailable === false && !instance.hasArchiveCopy) return [];
   const frames = Math.max(1, Number(instance.numberOfFrames) || 1);
   const base = `/api/dicomweb/instances/${instance._id}/file`;
   if (frames === 1) return [`wadouri:${base}`];
@@ -8,7 +9,11 @@ export function imageIdsFor(instance) {
 }
 
 export function seriesImageIds(series) {
-  return (series?.instances || []).flatMap((instance) => imageIdsFor(instance));
+  const instances = series?.instances || [];
+  const usable = instances.some((item) => item.fileAvailable !== false)
+    ? instances.filter((item) => item.fileAvailable !== false)
+    : instances;
+  return usable.flatMap((instance) => imageIdsFor(instance));
 }
 
 function planeModule(instance) {

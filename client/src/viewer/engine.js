@@ -217,6 +217,8 @@ export function createViewerEngine() {
     };
   }
 
+  let loadErrorListener = null;
+
   function onRendered() {
     publish();
   }
@@ -224,6 +226,12 @@ export function createViewerEngine() {
   function onAnnotation() {
     publish();
     if (!restoring && annotationListener) annotationListener(annotation.state.getAllAnnotations());
+  }
+
+  function onImageLoadFailed(event) {
+    const detail = event?.detail || {};
+    const message = detail.error?.message || detail.message || "The DICOM image could not be loaded";
+    if (loadErrorListener) loadErrorListener(message);
   }
 
   async function init() {
@@ -234,6 +242,7 @@ export function createViewerEngine() {
       eventTarget.addEventListener(Enums.Events.STACK_NEW_IMAGE, onRendered);
       eventTarget.addEventListener(Enums.Events.VOI_MODIFIED, onRendered);
       eventTarget.addEventListener(Enums.Events.CAMERA_MODIFIED, onRendered);
+      eventTarget.addEventListener(Enums.Events.IMAGE_LOAD_FAILED, onImageLoadFailed);
       eventTarget.addEventListener(toolEnums.Events.ANNOTATION_COMPLETED, onAnnotation);
       eventTarget.addEventListener(toolEnums.Events.ANNOTATION_MODIFIED, onAnnotation);
       eventTarget.addEventListener(toolEnums.Events.ANNOTATION_REMOVED, onAnnotation);
@@ -458,6 +467,9 @@ export function createViewerEngine() {
     setAnnotationListener(listener) {
       annotationListener = listener;
     },
+    setLoadErrorListener(listener) {
+      loadErrorListener = listener;
+    },
     snapshot() {
       return snapshot;
     },
@@ -667,6 +679,7 @@ export function createViewerEngine() {
       eventTarget.removeEventListener(Enums.Events.STACK_NEW_IMAGE, onRendered);
       eventTarget.removeEventListener(Enums.Events.VOI_MODIFIED, onRendered);
       eventTarget.removeEventListener(Enums.Events.CAMERA_MODIFIED, onRendered);
+      eventTarget.removeEventListener(Enums.Events.IMAGE_LOAD_FAILED, onImageLoadFailed);
       eventTarget.removeEventListener(toolEnums.Events.ANNOTATION_COMPLETED, onAnnotation);
       eventTarget.removeEventListener(toolEnums.Events.ANNOTATION_MODIFIED, onAnnotation);
       eventTarget.removeEventListener(toolEnums.Events.ANNOTATION_REMOVED, onAnnotation);

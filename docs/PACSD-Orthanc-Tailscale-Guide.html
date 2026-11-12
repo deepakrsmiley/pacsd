@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PACSD – Orthanc, Tailscale and Multi-Hospital Setup</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", -apple-system, Arial, sans-serif; color: #1d1d1f; font-size: 10.5pt; line-height: 1.55; margin: 0; }
+  .cover { border-radius: 16px; background: linear-gradient(135deg, #1c1c21, #3b1d7a); color: #fff; padding: 26px 28px; margin-bottom: 22px; }
+  .cover small { color: #c4b5fd; letter-spacing: .04em; font-weight: 600; }
+  .cover h1 { margin: 6px 0 4px; font-size: 22pt; }
+  .cover p { margin: 0; color: #d4d4d8; }
+  h2 { font-size: 15pt; color: #3b1d7a; border-bottom: 2px solid #ede9fe; padding-bottom: 4px; margin-top: 26px; }
+  h3 { font-size: 12pt; margin: 18px 0 6px; }
+  code { font-family: Consolas, monospace; background: #f4f4f5; padding: 1px 5px; border-radius: 5px; font-size: 9.5pt; }
+  pre { background: #18181b; color: #e4e4e7; padding: 10px 14px; border-radius: 10px; font-size: 9.5pt; white-space: pre-wrap; }
+  pre code { background: none; color: inherit; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 9.8pt; }
+  th, td { border: 1px solid #e4e4e7; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #f5f3ff; }
+  .note { background: #f5f3ff; border-left: 4px solid #7c3aed; padding: 9px 13px; border-radius: 8px; margin: 10px 0; }
+  .warn { background: #fff7ed; border-left: 4px solid #ea580c; padding: 9px 13px; border-radius: 8px; margin: 10px 0; }
+  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0 14px; }
+  .box { border: 1.5px solid #7c3aed; border-radius: 10px; padding: 6px 10px; background: #faf5ff; font-weight: 600; font-size: 9.5pt; }
+  .arrow { color: #7c3aed; font-weight: 700; }
+  .hosp { display: grid; grid-template-columns: 1fr 40px 1fr; align-items: center; gap: 8px; margin: 10px 0 14px; }
+  .hosp .col { display: grid; gap: 6px; }
+  .page-break { page-break-before: always; }
+  .footer { margin-top: 30px; color: #71717a; font-size: 8.5pt; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <small>GALACTIC MEDICAL SYSTEMS · PACSD</small>
+  <h1>Orthanc, Tailscale &amp; Multi-Hospital Setup</h1>
+  <p>Deployment reference for https://pacsd.onrender.com</p>
+</div>
+
+<h2>1. Does Tailscale need to be installed on the client system?</h2>
+<p><strong>Yes, but only on one computer at the hospital: the PC that runs Orthanc.</strong> Nothing has to be installed on the scanners, the radiologists' computers or Render.</p>
+
+<div class="flow">
+  <span class="box">Scanners (CT / MR / X-ray)</span><span class="arrow">→ DICOM 4242 (local network) →</span>
+  <span class="box">Orthanc PC + Tailscale</span><span class="arrow">→ HTTPS (Funnel) →</span>
+  <span class="box">pacsd.onrender.com</span><span class="arrow">→</span>
+  <span class="box">Radiologists (any browser)</span>
+</div>
+
+<table>
+  <tr><th>Computer</th><th>Install Tailscale?</th></tr>
+  <tr><td>Hospital Orthanc PC</td><td><strong>Yes</strong></td></tr>
+  <tr><td>Scanners / modalities</td><td>No. They send to the Orthanc PC on the local network.</td></tr>
+  <tr><td>Radiologist / doctor computers</td><td>No. They just open https://pacsd.onrender.com.</td></tr>
+  <tr><td>Render (cloud)</td><td>No. It reaches Orthanc through the public Funnel address.</td></tr>
+</table>
+
+<h3>Steps on the hospital Orthanc PC</h3>
+<ol>
+  <li>Download and install <strong>Tailscale for Windows</strong> from <code>tailscale.com/download/windows</code>.</li>
+  <li>Sign in with the <strong>GMS (Galactic) account</strong>, not a hospital staff account, so that you control every site from one place.</li>
+  <li>In the Tailscale tray icon menu, enable <strong>Run unattended</strong>. This keeps it running after a reboot or when nobody is logged in.</li>
+  <li>In the Tailscale admin console under <strong>Machines</strong>, open this PC's menu and choose <strong>Disable key expiry</strong>. Otherwise the connection stops after about 180 days.</li>
+  <li>Under <strong>DNS</strong> in the admin console, enable <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong>.</li>
+  <li>In PowerShell as Administrator, run:
+<pre><code>tailscale funnel --bg 8042</code></pre>
+  The first time, it shows a link to approve Funnel. Approve it and run the command again.</li>
+  <li>Copy the address it prints, for example <code>https://gh-orthanc.tail9f8e7.ts.net</code>, and put it in Render as <code>ORTHANC_URL</code>, together with <code>ORTHANC_USERNAME</code> and <code>ORTHANC_PASSWORD</code>.</li>
+</ol>
+<div class="note"><strong>PC requirements:</strong> on 24/7, sleep turned off, a fixed local IP (for example 192.168.1.50), and ideally on a UPS.</div>
+<div class="warn"><strong>If the hospital IT team does not allow Tailscale:</strong> use Cloudflare Tunnel (same idea, different tool), or ask them to forward port 8042 to the Orthanc PC with HTTPS. Tailscale is the simplest option.</div>
+
+<div class="page-break"></div>
+<h2>2. What happens when there are more hospitals?</h2>
+<p>Right now PACSD can connect to only <strong>one</strong> Orthanc: there is a single <code>ORTHANC_URL</code> setting on Render, used everywhere in the server code. The same steps work for the first hospital, but a second hospital with its own Orthanc PC can't be added just by repeating them.</p>
+
+<h3>Option 1: One Orthanc per hospital, all connected to PACSD (recommended, needs a code change)</h3>
+<div class="hosp">
+  <div class="col">
+    <span class="box">Hospital 1: Scanners → Orthanc + Tailscale</span>
+    <span class="box">Hospital 2: Scanners → Orthanc + Tailscale</span>
+    <span class="box">Hospital 3: Scanners → Orthanc + Tailscale</span>
+  </div>
+  <span class="arrow" style="font-size:18pt;text-align:center">→</span>
+  <span class="box" style="text-align:center">pacsd.onrender.com</span>
+</div>
+<ul>
+  <li>Every hospital gets the <strong>same on-site setup</strong> as the first: one PC with Orthanc and Tailscale, and scanners sending over the local network.</li>
+  <li>In PACSD, each facility gets its own <strong>Orthanc connection</strong> (address, username, password) under Facility settings, instead of one global <code>ORTHANC_URL</code>.</li>
+  <li>Studies are automatically filed under the right hospital, because PACSD knows which Orthanc they came from. No AE-title guesswork.</li>
+  <li>Adding hospital number 10 is just: install the PC on site, then paste its address into PACSD. <strong>No Render changes or redeploys.</strong></li>
+  <li>One hospital's PC being offline doesn't affect the others.</li>
+</ul>
+<p><strong>What would change in PACSD:</strong> store Orthanc connections per facility in the database, make the 10-second sync check each hospital's Orthanc, remember which Orthanc every image came from (so the viewer and previews fetch from the right place), and add an "Orthanc gateway" form with a <strong>Test connection</strong> button on the admin screen.</p>
+
+<h3>Option 2: One central Orthanc in the cloud (no code change, but worse for hospitals)</h3>
+<p>Rent a cloud server and run a single Orthanc there. Every hospital's scanners, or a small local Orthanc at each site, forward images over the internet to it.</p>
+<p><strong>Downsides:</strong></p>
+<ul>
+  <li>Scanners sending DICOM directly over the internet is unencrypted, and many hospital IT teams will refuse it.</li>
+  <li>If a hospital's internet drops, its scans aren't received.</li>
+  <li>When images are forwarded, the sender's AE title is lost, so PACSD can't tell which hospital they came from without extra rules.</li>
+  <li>You'd pay for the cloud server and its storage.</li>
+</ul>
+
+<h3>Recommendation</h3>
+<div class="note">
+  <p style="margin:0 0 6px"><strong>For the first hospital (GH):</strong> continue exactly as planned. The single-Orthanc setup works, and nothing set up now is wasted.</p>
+  <p style="margin:0"><strong>Before the second hospital:</strong> build Option 1. That hospital's on-site steps are then identical: install Orthanc, install Tailscale, run Funnel. The only difference is that you enter its address in PACSD's admin screen instead of Render.</p>
+</div>
+
+<div class="footer">Galactic Medical Systems · PACSD deployment notes · November 2026</div>
+</body>
+</html>
