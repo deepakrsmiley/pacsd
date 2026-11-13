@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch-path=src --watch-path=../shared src/index.js",
     "start": "node src/index.js",
+    "worker": "node src/worker.js",
     "create-admin": "node src/createAdmin.js",
     "test": "vitest run"
   },

@@ -109,10 +109,27 @@ const studySchema = new Schema(
     },
     priority: { type: String, enum: ["routine", "urgent", "stat"], default: "routine" },
     acquiredAt: { type: Date },
+    // Ingest/transfer lifecycle (separate from clinical status above).
+    transferPhase: {
+      type: String,
+      enum: ["waiting", "receiving", "finalizing", "verifying", "processing", "indexing", "completed", "failed", "interrupted", "incomplete"],
+      default: "completed",
+      index: true,
+    },
+    orthancStudyId: { type: String, default: "", index: true },
+    receivedInstances: { type: Number, default: 0 },
+    expectedInstances: { type: Number, default: null },
+    receivedBytes: { type: Number, default: 0 },
+    transferStartedAt: { type: Date },
+    transferCompletedAt: { type: Date },
+    lastInstanceAt: { type: Date },
+    transferError: { type: String, default: "" },
   },
   { timestamps: true },
 );
 studySchema.index({ facilityId: 1, accession: 1 }, { unique: true });
+studySchema.index({ facilityId: 1, transferPhase: 1, updatedAt: -1 });
+studySchema.index({ facilityId: 1, updatedAt: -1 });
 const Study = mongoose.model("Study", studySchema);
 
 const Series = mongoose.model(
@@ -151,7 +168,7 @@ const Instance = mongoose.model(
       slope: { type: Number, default: 1 },
       intercept: { type: Number, default: 0 },
       filePath: { type: String, required: true },
-      orthancId: { type: String, default: "" },
+      orthancId: { type: String, default: "", index: true },
       byteLength: { type: Number, default: 0 },
       instanceNumber: { type: Number, default: 0 },
       numberOfFrames: { type: Number, default: 1 },

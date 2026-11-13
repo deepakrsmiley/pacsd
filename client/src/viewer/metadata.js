@@ -10,10 +10,8 @@ export function imageIdsFor(instance) {
 
 export function seriesImageIds(series) {
   const instances = series?.instances || [];
-  const usable = instances.some((item) => item.fileAvailable !== false)
-    ? instances.filter((item) => item.fileAvailable !== false)
-    : instances;
-  return usable.flatMap((instance) => imageIdsFor(instance));
+  const usable = instances.filter((item) => item.fileAvailable !== false || item.hasArchiveCopy);
+  return (usable.length ? usable : instances).flatMap((instance) => imageIdsFor(instance));
 }
 
 function planeModule(instance) {

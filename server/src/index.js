@@ -5,6 +5,7 @@ import { assertProductionConfig } from "./config.js";
 import { createApp } from "./createApp.js";
 import { connectDb } from "./db.js";
 import { startOrthancPoller } from "./orthancSync.js";
+import { startTransferWatcher } from "./transferProgress.js";
 import { seedIfEmpty } from "./seed.js";
 
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env") });
@@ -39,5 +40,7 @@ if (process.env.SEED_DEMO === "true") {
 const app = createApp();
 app.listen(port, () => {
   console.log(`PACSD API listening on ${port}`);
-  startOrthancPoller();
+  // When a dedicated Render worker runs the poller, set ORTHANC_POLLER=false on the web service.
+  startTransferWatcher();
+  if (process.env.ORTHANC_POLLER !== "false") startOrthancPoller();
 });

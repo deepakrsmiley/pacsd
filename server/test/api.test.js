@@ -225,6 +225,19 @@ describe("Orthanc ingest", () => {
         }
         return { ok: true, status: 200, json: async () => ({ Changes: [], Done: true, Last: 3 }) };
       }
+      if (href.includes("/instances/inst-known") && !href.includes("/file") && !href.includes("/metadata")) {
+        return { ok: true, status: 200, json: async () => ({ ParentStudy: "study-1", ID: "inst-known" }) };
+      }
+      if (href.includes("/instances/inst-unknown") && !href.includes("/file") && !href.includes("/metadata")) {
+        return { ok: true, status: 200, json: async () => ({ ParentStudy: "study-2", ID: "inst-unknown" }) };
+      }
+      if (href.endsWith("/studies/study-1") || href.endsWith("/studies/study-2")) {
+        const uid = href.includes("study-1") ? parseDicomBuffer(known).studyUid : parseDicomBuffer(unknown).studyUid;
+        return { ok: true, status: 200, json: async () => ({ MainDicomTags: { StudyInstanceUID: uid } }) };
+      }
+      if (href.includes("/statistics")) {
+        return { ok: true, status: 200, json: async () => ({ CountInstances: 1 }) };
+      }
       if (href.endsWith("/metadata/RemoteAET")) {
         const ae = href.includes("inst-known") ? "CTROOM" : "NOTREAL";
         return { ok: true, status: 200, text: async () => ae };
@@ -237,12 +250,15 @@ describe("Orthanc ingest", () => {
       }
       return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
     };
+    process.env.TRANSFER_VERIFY_GAP_MS = "0";
+    process.env.TRANSFER_QUIET_MS = "20000";
     try {
       await syncOrthancOnce();
       await syncOrthancOnce();
     } finally {
       globalThis.fetch = originalFetch;
       delete process.env.ORTHANC_URL;
+      delete process.env.TRANSFER_VERIFY_GAP_MS;
     }
     expect(await Instance.countDocuments({ sopUid: knownSop })).toBe(1);
     expect(await Instance.countDocuments({ sopUid: unknownSop })).toBe(1);
@@ -254,6 +270,28 @@ describe("Orthanc ingest", () => {
     expect(String((await Study.findOne({ accession: "ACC-ORTH-UNK" })).facilityId)).toBe(northId);
     expect((await DicomNode.findOne({ aeTitle: "NOTREAL" })).facilityId.toString()).toBe(northId);
     expect((await OrthancCursor.findOne({ key: "changes" })).lastSeq).toBe(3);
+    expect((await Study.findOne({ accession: "ACC-ORTH" })).transferPhase).toBe("completed");
+    expect((await Study.findOne({ accession: "ACC-ORTH" })).receivedInstances).toBe(1);
+  });
+
+  it("lists active transfers and paginates studies", async () => {
+    const buffer = buildSampleDicom({ patientId: "MRN-XFER", accession: "ACC-XFER", patientName: "Transfer^One" });
+    await ingestDicomBuffer({ buffer, facilityId: northId, source: "orthanc", fileName: "xfer.dcm", orthancId: "xfer-1", expectedFromOrthanc: 10 });
+    const study = await Study.findOne({ accession: "ACC-XFER" });
+    expect(study.transferPhase).toBe("receiving");
+    expect(study.receivedInstances).toBe(1);
+    expect(study.expectedInstances == null).toBe(true);
+    const tech = request.agent(app);
+    await tech.post("/api/auth/login").send({ email: "tech.north@galactic.test", password: "Galactic-Demo-2026" });
+    const active = await tech.get("/api/transfers/active").set("x-facility-id", northId);
+    expect(active.status).toBe(200);
+    expect(active.body.transfers.some((item) => item.accession === "ACC-XFER")).toBe(true);
+    const page = await tech.get("/api/studies").query({ page: 1, limit: 5, q: "XFER" }).set("x-facility-id", northId);
+    expect(page.status).toBe(200);
+    expect(page.body.page).toBe(1);
+    expect(page.body.limit).toBe(5);
+    expect(typeof page.body.total).toBe("number");
+    expect(page.body.studies.some((item) => item.accession === "ACC-XFER")).toBe(true);
   });
 
   it("accepts Orthanc store notifications only with the shared token", async () => {

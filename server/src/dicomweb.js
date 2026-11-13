@@ -3,12 +3,12 @@ import { z } from "zod";
 import { sortInstances, volumeAssessment } from "../../shared/dicomGeometry.js";
 import { readSpatialTags } from "./dicom.js";
 import { Instance, Series, Study, ViewerAnnotation, ViewerPreference } from "./models.js";
-import { localDicomPath } from "./dicomFiles.js";
+import { fileOnDisk, localDicomPath } from "./dicomFiles.js";
 import { orthancConfigured, orthancFetch } from "./orthancClient.js";
 import { archiveImageCount, backfillStudyByUid } from "./orthancSync.js";
 
 const UID = /^[0-9]+(?:\.[0-9]+)*$/;
-const MISSING_FILE = "The DICOM file is missing from storage and the archive. Upload the study again.";
+const MISSING_FILE = "The DICOM file is missing from this computer and was not found in Orthanc. Re-send the study from the console.";
 
 function safeUid(value) {
   const uid = String(value || "").trim();
@@ -103,8 +103,9 @@ async function ensureGeometry(instance) {
   if (instance.geometryReady) return instance;
   try {
     let buffer = null;
-    if (instance.filePath && fs.existsSync(instance.filePath)) {
-      buffer = await fs.promises.readFile(instance.filePath);
+    const filePath = await localDicomPath(instance);
+    if (filePath && fs.existsSync(filePath)) {
+      buffer = await fs.promises.readFile(filePath);
     }
     if (!buffer) throw new Error("The DICOM file is not in local storage");
     const spatial = readSpatialTags(buffer);
@@ -116,11 +117,7 @@ async function ensureGeometry(instance) {
   return instance;
 }
 
-function fileOnDisk(instance) {
-  return Boolean(instance.filePath && fs.existsSync(instance.filePath));
-}
-
-function publicInstance(instance) {
+function publicInstance(instance, archiveCount = 0) {
   const available = fileOnDisk(instance);
   return {
     _id: instance._id,
@@ -149,7 +146,8 @@ function publicInstance(instance) {
     manufacturer: instance.manufacturer || "",
     institution: instance.institution || "",
     fileAvailable: available,
-    hasArchiveCopy: available || Boolean(instance.orthancId),
+    // Only promise an archive restore when Orthanc still has this study.
+    hasArchiveCopy: available || archiveCount > 0,
   };
 }
 
@@ -319,6 +317,7 @@ export function registerDicomweb(app, { requireUser, requirePermission, wrap, au
     const availableCount = instances.filter(fileOnDisk).length;
     const archiveCount = await archiveImageCount(study.studyUid);
     if (archiveCount > instances.length) backfillStudyByUid(study.studyUid).catch(() => {});
+    const pixelsMissing = availableCount === 0 && archiveCount === 0 && instances.length > 0;
     await audit(req, "dicom.catalog", "study", study._id, study.facilityId, { series: series.length, instances: instances.length });
     res.json({
       source: "local-dicom",
@@ -326,7 +325,7 @@ export function registerDicomweb(app, { requireUser, requirePermission, wrap, au
       storedInstances: instances.length,
       availableInstances: availableCount,
       archiveInstances: archiveCount,
-      pixelsMissing: availableCount === 0 && archiveCount === 0 && instances.length > 0,
+      pixelsMissing,
       annotationStandard: "application-json",
       dicomSr: false,
       patient: {
@@ -345,7 +344,7 @@ export function registerDicomweb(app, { requireUser, requirePermission, wrap, au
         status: study.status,
       },
       series: series.map((item) => {
-        const sorted = sortInstances((bySeries.get(String(item._id)) || []).map(publicInstance));
+        const sorted = sortInstances((bySeries.get(String(item._id)) || []).map((instance) => publicInstance(instance, archiveCount)));
         return {
           _id: item._id,
           seriesUid: item.seriesUid,

@@ -33,6 +33,7 @@ import {
   Study,
   User,
 } from "./models.js";
+import { ACTIVE_TRANSFER_PHASES, publicTransfer, verifyStudyByOrthancId } from "./transferProgress.js";
 import { integrationStatus, normalizePhone, orthancPreview, requestReportAssist, sendReportEmail, sendWhatsApp, sendWhatsAppDocument, whatsappConfigured, whatsappWebUrl } from "./notify.js";
 import { localDicomPath } from "./dicomFiles.js";
 import { orthancBytes, orthancSystem } from "./orthancClient.js";
@@ -273,6 +274,19 @@ export function createApp() {
     res.status(202).json({ accepted: true });
   });
 
+  app.post("/api/orthanc/stable", (req, res) => {
+    const expected = String(process.env.ORTHANC_WEBHOOK_TOKEN || "");
+    if (!expected) return res.status(404).json({ error: "Not found" });
+    const given = String(req.get("x-pacsd-token") || "");
+    const valid = given.length === expected.length
+      && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+    if (!valid) return res.status(401).json({ error: "Invalid token" });
+    const studyId = String(req.body?.study || "");
+    if (!/^[0-9a-f-]{8,64}$/i.test(studyId)) return res.status(400).json({ error: "Invalid input" });
+    verifyStudyByOrthancId(studyId).catch((error) => console.error(`Orthanc stable verify failed: ${error.message}`));
+    res.status(202).json({ accepted: true });
+  });
+
   app.get("/api/events", requireUser, (req, res) => {
     res.set({
       "content-type": "text/event-stream",
@@ -499,6 +513,23 @@ export function createApp() {
     res.status(201).json({ patient });
   }));
 
+  app.get("/api/transfers/active", requireUser, requirePermission("study.read"), wrap(async (req, res) => {
+    const facilityId = selectedFacility(req);
+    const scope = scopedFacilityFilter(req.user, facilityId);
+    if (!scope) return res.status(403).json({ error: "Facility is outside your access" });
+    const studies = await Study.find({
+      ...scope,
+      transferPhase: { $in: [...ACTIVE_TRANSFER_PHASES, "incomplete"] },
+    })
+      .sort({ lastInstanceAt: -1, updatedAt: -1 })
+      .limit(40)
+      .populate("patientId", "name mrn")
+      .lean();
+    res.json({
+      transfers: studies.map((study) => publicTransfer(study, study.patientId)),
+    });
+  }));
+
   app.get("/api/studies", requireUser, requirePermission("study.read"), wrap(async (req, res) => {
     const facilityId = selectedFacility(req);
     const scope = scopedFacilityFilter(req.user, facilityId);
@@ -509,8 +540,39 @@ export function createApp() {
     if (req.query.mine === "1") filter.assignedTo = req.user._id;
     if (req.query.remote === "1") filter.$expr = { $ne: ["$readingFacilityId", "$facilityId"] };
     if (req.query.patientId) filter.patientId = req.query.patientId;
-    const studies = await Study.find(filter).sort({ updatedAt: -1 }).limit(100).populate("patientId", "name mrn sex birthDate").populate("assignedTo", "name");
-    res.json({ studies });
+    const accession = String(req.query.accession || "").trim();
+    if (accession) filter.accession = new RegExp(escapeRegex(accession), "i");
+    const q = String(req.query.q || "").trim();
+    if (q) {
+      const patients = await Patient.find({
+        ...(scope.facilityId ? { facilityId: scope.facilityId } : {}),
+        $or: [
+          { name: new RegExp(escapeRegex(q), "i") },
+          { mrn: new RegExp(escapeRegex(q), "i") },
+        ],
+      }).select("_id").limit(200);
+      filter.$or = [
+        { accession: new RegExp(escapeRegex(q), "i") },
+        { description: new RegExp(escapeRegex(q), "i") },
+        { modality: new RegExp(`^${escapeRegex(q)}$`, "i") },
+        { patientId: { $in: patients.map((item) => item._id) } },
+      ];
+    }
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
+    const skip = (page - 1) * limit;
+    const [total, studies] = await Promise.all([
+      Study.countDocuments(filter),
+      Study.find(filter)
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select("patientId facilityId readingFacilityId assignedTo accession studyUid modality description studyDate patientAge status priority acquiredAt transferPhase receivedInstances expectedInstances receivedBytes transferStartedAt transferCompletedAt lastInstanceAt createdAt updatedAt")
+        .populate("patientId", "name mrn sex birthDate")
+        .populate("assignedTo", "name")
+        .lean(),
+    ]);
+    res.json({ studies, total, page, limit });
   }));
 
   app.post("/api/studies", requireUser, requirePermission("study.write"), wrap(async (req, res) => {

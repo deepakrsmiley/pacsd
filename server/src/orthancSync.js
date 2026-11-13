@@ -2,14 +2,16 @@ import { DicomNode, Facility, Instance, OrthancCursor, Study, TransferJob } from
 import { parseDicomBuffer } from "./dicom.js";
 import { ingestDicomBuffer } from "./ingest.js";
 import { orthancBytes, orthancConfigured, orthancJson, orthancText } from "./orthancClient.js";
+import { settleInactiveTransfers, verifyStudyQuiet } from "./transferProgress.js";
 
 const CURSOR_KEY = "changes";
 const BACKFILL_LIMIT = 300;
-const IMPORT_CONCURRENCY = 6;
+const IMPORT_CONCURRENCY = 8;
 const CHANGES_PAGE = 50;
-const CHANGES_PER_SYNC = 100;
+const CHANGES_PER_SYNC = 150;
 
 const listedStudies = new Set();
+const expectedCache = new Map();
 
 export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
   if (!orthancConfigured()) return { skipped: true };
@@ -24,6 +26,13 @@ export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
     const page = await orthancJson(`/changes?since=${since}&limit=${CHANGES_PAGE}`, {}, fetchImpl);
     for (const change of page.Changes || []) {
       if (change.ChangeType === "NewInstance") await importOrthancInstance(change.ID, fetchImpl);
+      if (change.ChangeType === "StableStudy") {
+        try {
+          await handleStableStudy(change.ID, fetchImpl);
+        } catch {
+          // Study may still be importing; the inactivity settler retries.
+        }
+      }
     }
     processed += (page.Changes || []).length;
     last = Number.isFinite(page.Last) ? page.Last : since;
@@ -36,6 +45,7 @@ export async function syncOrthancOnce(fetchImpl = globalThis.fetch) {
     since = last;
   }
   if (await reconcileMissingStudies(studyIds, fetchImpl)) more = true;
+  await settleInactiveTransfers();
   return { lastSeq: last, more };
 }
 
@@ -45,11 +55,13 @@ async function listNewStudies(studyIds, fetchImpl) {
     const info = await orthancJson(`/studies/${studyId}`, {}, fetchImpl);
     const uid = info?.MainDicomTags?.StudyInstanceUID || "";
     if (!uid) continue;
-    const existing = await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }] }).select("_id");
+    const existing = await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }] }).select("_id orthancStudyId");
     if (!existing) {
       const instances = await orthancJson(`/studies/${studyId}/instances`, {}, fetchImpl);
       if (!instances?.[0]?.ID) continue;
       await importOrthancInstance(instances[0].ID, fetchImpl);
+    } else if (!existing.orthancStudyId) {
+      await Study.updateOne({ _id: existing._id }, { orthancStudyId: studyId });
     }
     listedStudies.add(studyId);
   }
@@ -117,6 +129,20 @@ async function orthancStudyIdFor(studyUid) {
   return (matches || []).find((item) => item.Type === "Study")?.ID || "";
 }
 
+async function orthancExpectedCount(orthancStudyId, fetchImpl) {
+  if (!orthancStudyId) return null;
+  if (expectedCache.has(orthancStudyId)) return expectedCache.get(orthancStudyId);
+  try {
+    const stats = await orthancJson(`/studies/${orthancStudyId}/statistics`, { timeoutMs: 5000 }, fetchImpl);
+    const count = Number(stats?.CountInstances) || 0;
+    const value = count > 0 ? count : null;
+    expectedCache.set(orthancStudyId, value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 export async function archiveImageCount(studyUid) {
   if (!orthancConfigured() || !studyUid) return 0;
   try {
@@ -134,6 +160,28 @@ export async function backfillStudyByUid(studyUid) {
   const id = await orthancStudyIdFor(studyUid);
   if (!id) return 0;
   return backfillOrthancStudy(id, Number.POSITIVE_INFINITY);
+}
+
+async function handleStableStudy(orthancStudyId, fetchImpl) {
+  if (!orthancStudyId) return;
+  expectedCache.delete(orthancStudyId);
+  const info = await orthancJson(`/studies/${orthancStudyId}`, {}, fetchImpl);
+  const uid = info?.MainDicomTags?.StudyInstanceUID || "";
+  let study = uid
+    ? await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }, { orthancStudyId }] })
+    : await Study.findOne({ orthancStudyId });
+  if (!study) {
+    await backfillOrthancStudy(orthancStudyId, Number.POSITIVE_INFINITY, fetchImpl);
+    study = uid
+      ? await Study.findOne({ $or: [{ studyUid: uid }, { aliases: uid }, { orthancStudyId }] })
+      : await Study.findOne({ orthancStudyId });
+  }
+  if (!study) return;
+  if (!study.orthancStudyId) {
+    study.orthancStudyId = orthancStudyId;
+    await study.save();
+  }
+  await verifyStudyQuiet(study._id, { fromStable: true });
 }
 
 async function defaultFacilityId() {
@@ -156,6 +204,15 @@ export async function importNotifiedInstance(orthancId) {
     await importOrthancInstance(orthancId);
   } finally {
     kickOrthancSync();
+  }
+}
+
+async function parentStudyId(orthancId, fetchImpl) {
+  try {
+    const info = await orthancJson(`/instances/${encodeURIComponent(orthancId)}`, { timeoutMs: 5000 }, fetchImpl);
+    return info?.ParentStudy || "";
+  } catch {
+    return "";
   }
 }
 
@@ -200,6 +257,8 @@ async function importInstanceNow(orthancId, fetchImpl) {
       { upsert: true },
     );
   }
+  const orthancStudyId = await parentStudyId(orthancId, fetchImpl);
+  const expectedFromOrthanc = await orthancExpectedCount(orthancStudyId, fetchImpl);
   const buffer = await orthancBytes(`/instances/${orthancId}/file`, {}, fetchImpl);
   const parsed = parseDicomBuffer(buffer);
   const existing = await Instance.findOne({ sopUid: parsed.sopUid }).select("studyId");
@@ -218,6 +277,8 @@ async function importInstanceNow(orthancId, fetchImpl) {
     source: "orthanc",
     fileName: `${orthancId}.dcm`,
     orthancId,
+    orthancStudyId,
+    expectedFromOrthanc,
   });
 }
 
@@ -255,9 +316,21 @@ export function kickOrthancSync() {
   if (timer) tick();
 }
 
+function pollIntervalMs() {
+  const raw = Number(process.env.ORTHANC_POLL_MS);
+  if (Number.isFinite(raw) && raw >= 500) return raw;
+  return 2000;
+}
+
 export function startOrthancPoller() {
   if (!orthancConfigured() || timer) return;
-  timer = setInterval(tick, 10000);
+  timer = setInterval(tick, pollIntervalMs());
   if (typeof timer.unref === "function") timer.unref();
   tick();
+}
+
+export function stopOrthancPoller() {
+  if (!timer) return;
+  clearInterval(timer);
+  timer = null;
 }

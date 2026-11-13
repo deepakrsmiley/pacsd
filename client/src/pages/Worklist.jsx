@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, FileText, RotateCcw, Search } from "lucide-react";
 import { api } from "../api.js";
+import ReceivingStudies from "../components/ReceivingStudies.jsx";
 import { canReadDicom, useAuth } from "../auth.jsx";
 import { useFacility } from "../facility.jsx";
 import { useToasts } from "../feedback.jsx";
@@ -23,9 +24,10 @@ const EMPTY_FILTERS = {
   reportStatus: "",
   timeFrame: "",
   searchBy: "received",
+  q: "",
 };
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 25;
 
 export default function Worklist({ mode }) {
   const navigate = useNavigate();
@@ -35,39 +37,59 @@ export default function Worklist({ mode }) {
   const canAssign = ["system_admin", "radiologist", "technologist"].includes(user?.role);
   const toasts = useToasts();
   const [studies, setStudies] = useState([]);
+  const [total, setTotal] = useState(0);
   const [reports, setReports] = useState([]);
   const [assignees, setAssignees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(EMPTY_FILTERS);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [sort, setSort] = useState({ key: "date", direction: "desc" });
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState("");
 
-  async function load() {
+  const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (mode === "mine") params.set("mine", "1");
     if (mode === "review") params.set("status", "reporting");
     if (mode === "all") params.set("remote", "0");
+    params.set("page", String(page));
+    params.set("limit", String(PAGE_SIZE));
+    if (filters.accession) params.set("accession", filters.accession);
+    if (filters.modality) params.set("modality", filters.modality);
+    const q = [filters.q, filters.name, filters.patientId, filters.study].filter(Boolean).join(" ").trim();
+    if (q) params.set("q", q);
     const [studyData, reportData] = await Promise.all([
       api(`/api/studies?${params.toString()}`),
       api("/api/reports").catch(() => ({ reports: [] })),
     ]);
-    const next = mode === "review"
-      ? studyData.studies.filter((study) => study.status === "reporting" || study.status === "preliminary")
-      : studyData.studies;
+    let next = studyData.studies || [];
+    if (mode === "review") {
+      next = next.filter((study) => study.status === "reporting" || study.status === "preliminary");
+    }
     setStudies(next);
+    setTotal(Number(studyData.total) || next.length);
     setReports(reportData.reports || []);
-  }
+  }, [mode, page, filters]);
 
   useEffect(() => {
     setSelectedId("");
-    setStudies([]);
-    setPage(0);
+    setPage(1);
+  }, [mode, facilityId]);
+
+  useEffect(() => {
     setLoading(true);
     load().catch((err) => toasts.error(err.message)).finally(() => setLoading(false));
     api("/api/assignees").then((data) => setAssignees(data.users)).catch(() => setAssignees([]));
-  }, [mode, facilityId, toasts]);
+  }, [mode, facilityId, load, toasts]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      if (draft.q === filters.q) return;
+      setFilters((current) => ({ ...current, q: draft.q }));
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [draft.q, filters.q]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return undefined;
@@ -79,11 +101,12 @@ export default function Worklist({ mode }) {
     };
     source.addEventListener("study.created", refresh);
     source.addEventListener("study.updated", refresh);
+    source.addEventListener("transfer.completed", refresh);
     return () => {
       clearTimeout(pending);
       source.close();
     };
-  }, [mode, facilityId]);
+  }, [mode, facilityId, load]);
 
   async function assign(study, assignedTo) {
     try {
@@ -109,12 +132,10 @@ export default function Worklist({ mode }) {
   const modalities = useMemo(() => [...new Set(studies.map((study) => study.modality).filter(Boolean))].sort(), [studies]);
   const rows = useMemo(() => {
     const filtered = studies.filter((study) => matches(study, filters, reports));
-    const sorted = [...filtered].sort((a, b) => compareStudies(a, b, sort));
-    return sorted;
+    return [...filtered].sort((a, b) => compareStudies(a, b, sort));
   }, [studies, reports, filters, sort]);
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const visible = rows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), pageCount);
   const [title, summary] = TITLES[mode];
 
   function toggleSort(key) {
@@ -128,10 +149,14 @@ export default function Worklist({ mode }) {
         <h1 className="mt-1 text-[28px] font-bold leading-tight tracking-[-0.02em] text-white md:text-[32px]">{title}</h1>
         <p className="mt-1 text-[14px] text-white/50">{summary}</p>
       </header>
+      <ReceivingStudies onStudyReady={() => load().catch(() => {})} />
       <form
         className="mb-4 grid gap-3 rounded-2xl bg-[#1c1c21] p-4 ring-1 ring-white/[0.06] md:grid-cols-3 xl:grid-cols-6"
-        onSubmit={(event) => { event.preventDefault(); setFilters(draft); setPage(0); }}
+        onSubmit={(event) => { event.preventDefault(); setFilters(draft); setPage(1); }}
       >
+        <Filter label="Quick search">
+          <input className={inputClass} placeholder="Name, MRN, accession…" value={draft.q} onChange={(event) => setDraft({ ...draft, q: event.target.value })} />
+        </Filter>
         <Filter label="Patient ID">
           <input className={inputClass} value={draft.patientId} onChange={(event) => setDraft({ ...draft, patientId: event.target.value })} />
         </Filter>
@@ -180,7 +205,7 @@ export default function Worklist({ mode }) {
           <button
             className="inline-flex h-10 items-center gap-1.5 rounded-full bg-white/[0.08] px-5 text-[14px] font-medium text-white/85 hover:bg-white/[0.12]"
             type="button"
-            onClick={() => { setDraft(EMPTY_FILTERS); setFilters(EMPTY_FILTERS); setPage(0); }}
+            onClick={() => { setDraft(EMPTY_FILTERS); setFilters(EMPTY_FILTERS); setPage(1); }}
           >
             <RotateCcw className="h-4 w-4" aria-hidden="true" /> Reset
           </button>
@@ -202,11 +227,12 @@ export default function Worklist({ mode }) {
                 <SortHeader label="Modality" active={sort.key === "modality"} onClick={() => toggleSort("modality")} />
                 <th className="px-3 py-2 font-medium">Report</th>
                 <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Ingest</th>
                 <th className="px-3 py-2 font-medium">Assignee</th>
               </tr>
             </thead>
             <tbody>
-              {visible.map((study) => {
+              {rows.map((study) => {
                 const when = studyWhen(study);
                 const age = patientAge({ patient: study.patientId, study });
                 const reportStatus = reportStatusFor(study._id, reports);
@@ -254,6 +280,7 @@ export default function Worklist({ mode }) {
                     <td className="px-3 py-2">{study.modality}</td>
                     <td className="px-3 py-2"><Badge tone={toneFor(reportStatus === "none" ? "" : reportStatus)}>{reportStatus === "none" ? "No report" : reportStatus}</Badge></td>
                     <td className="px-3 py-2"><Badge tone={toneFor(study.status)}>{study.status}</Badge></td>
+                    <td className="px-3 py-2"><Badge tone={ingestTone(study.transferPhase)}>{study.transferPhase || "completed"}</Badge></td>
                     <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
                       {canAssign ? (
                         <select className="h-8 max-w-[160px] border border-white/10 bg-black/40 px-2 text-xs" aria-label={`Assignee for ${study.accession}`} value={study.assignedTo?._id || ""} onChange={(event) => assign(study, event.target.value)}>
@@ -265,8 +292,8 @@ export default function Worklist({ mode }) {
                   </tr>
                 );
               })}
-              {!visible.length && (
-                <tr><td className="px-3 py-16 text-center text-[14px] text-white/45" colSpan={12}>No studies match this worklist.</td></tr>
+              {!rows.length && (
+                <tr><td className="px-3 py-16 text-center text-[14px] text-white/45" colSpan={13}>No studies match this worklist.</td></tr>
               )}
             </tbody>
           </table>
@@ -275,13 +302,20 @@ export default function Worklist({ mode }) {
       <footer className="flex flex-wrap items-center justify-between gap-2 py-3 text-[12px] text-white/45">
         <span>Eye opens the viewer. Document opens the report. Amber marks STAT priority and age of 80 or more.</span>
         <span className="flex items-center gap-2">
-          <span>Showing {rows.length ? safePage * PAGE_SIZE + 1 : 0} to {Math.min(rows.length, safePage * PAGE_SIZE + PAGE_SIZE)} of {rows.length}</span>
-          <button type="button" className="border border-white/15 px-2 py-1 disabled:opacity-40" disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</button>
-          <button type="button" className="border border-white/15 px-2 py-1 disabled:opacity-40" disabled={safePage >= pageCount - 1} onClick={() => setPage((current) => current + 1)}>Next</button>
+          <span>Showing {total ? (safePage - 1) * PAGE_SIZE + 1 : 0} to {Math.min(total, safePage * PAGE_SIZE)} of {total}</span>
+          <button type="button" className="border border-white/15 px-2 py-1 disabled:opacity-40" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+          <button type="button" className="border border-white/15 px-2 py-1 disabled:opacity-40" disabled={safePage >= pageCount} onClick={() => setPage((current) => current + 1)}>Next</button>
         </span>
       </footer>
     </div>
   );
+}
+
+function ingestTone(phase) {
+  if (phase === "completed") return "good";
+  if (phase === "failed" || phase === "incomplete" || phase === "interrupted") return "bad";
+  if (phase === "receiving" || phase === "processing" || phase === "indexing" || phase === "waiting") return "info";
+  return "neutral";
 }
 
 const inputClass = "h-10 w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 text-[14px] text-white outline-none focus:border-violet-400/60 focus:ring-4 focus:ring-violet-500/15";

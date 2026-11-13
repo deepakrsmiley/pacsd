@@ -326,6 +326,10 @@ export function parseDicomBuffer(buffer) {
     photometric,
     samplesPerPixel: samples,
     numberOfFrames: Number(dataSet.string("x00280008") || 1) || 1,
+    numberOfStudyRelatedInstances: (() => {
+      const raw = Number(dataSet.string("x00201208") || 0);
+      return Number.isFinite(raw) && raw > 0 ? raw : null;
+    })(),
     pixelSpacing: decimalPair(dataSet, "x00280030"),
     imagerPixelSpacing: decimalPair(dataSet, "x00181164"),
     orientation: orientationMarkers(dataSet),

@@ -7,12 +7,21 @@ import { parseDicomBuffer } from "./dicom.js";
 import { publishStudyChange } from "./liveEvents.js";
 import { Instance, Patient, Series, Study, TransferJob } from "./models.js";
 import { storeInOrthanc } from "./notify.js";
+import { recordInstanceReceived } from "./transferProgress.js";
 
 function asyncHash(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-export async function ingestDicomBuffer({ buffer, facilityId, source = "upload", fileName = "", orthancId: knownOrthancId = "" }) {
+export async function ingestDicomBuffer({
+  buffer,
+  facilityId,
+  source = "upload",
+  fileName = "",
+  orthancId: knownOrthancId = "",
+  orthancStudyId = "",
+  expectedFromOrthanc = null,
+}) {
   const started = Date.now();
   let parsed;
   try {
@@ -71,6 +80,12 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
         patientAge: ageToken,
         status: "acquired",
         acquiredAt: new Date(),
+        transferPhase: "receiving",
+        transferStartedAt: new Date(),
+        orthancStudyId: orthancStudyId || "",
+        receivedInstances: 0,
+        receivedBytes: 0,
+        expectedInstances: parsed.numberOfStudyRelatedInstances || null,
       });
     } else {
       const known = study.studyUid === parsed.studyUid || (study.aliases || []).includes(parsed.studyUid);
@@ -108,6 +123,7 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
     if (!orthancId && process.env.ORTHANC_URL && source !== "orthanc") {
       orthancId = await storeInOrthanc(buffer);
     }
+    const priorInstance = await Instance.findOne({ sopUid: parsed.sopUid }).select("_id");
     const instance = await Instance.findOneAndUpdate(
       { sopUid: parsed.sopUid },
       {
@@ -146,6 +162,7 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
       },
       { upsert: true, new: true },
     );
+    const isNewInstance = !priorInstance;
     await TransferJob.create({
       facilityId,
       direction: "inbound",
@@ -155,10 +172,18 @@ export async function ingestDicomBuffer({ buffer, facilityId, source = "upload",
       studyUid: parsed.studyUid,
       accession: parsed.accession || "",
       modality: parsed.modality || "",
-      status: existing ? "duplicate" : "stored",
+      status: existing || priorInstance ? "duplicate" : "stored",
       instanceId: instance._id,
       bytes: buffer.length,
       durationMs: Date.now() - started,
+    });
+    await recordInstanceReceived({
+      study,
+      bytes: buffer.length,
+      isNewInstance,
+      orthancStudyId,
+      expectedFromDicom: parsed.numberOfStudyRelatedInstances,
+      expectedFromOrthanc,
     });
     publishStudyChange(facilityId, study._id, createdStudy ? "study.created" : "study.updated");
     return { instanceId: instance._id, patientId: patient._id, studyId: study._id, sopUid: parsed.sopUid };

@@ -15,6 +15,7 @@ import { bindingFromEvent, matchShortcut, shortcutMap } from "./shortcuts.js";
 import { VOLUME_PRESETS, findVolumePreset } from "./volumePresets.js";
 import DicomViewport, { DicomOverlay } from "./gms/DicomViewport.jsx";
 import PatientSidebar from "./gms/PatientSidebar.jsx";
+import SeriesRail from "./gms/SeriesRail.jsx";
 import StudyInfoPanel from "./gms/StudyInfoPanel.jsx";
 import ThumbnailStrip from "./gms/ThumbnailStrip.jsx";
 import ViewerBottomToolbar from "./gms/ViewerBottomToolbar.jsx";
@@ -131,6 +132,7 @@ export default function Workstation() {
   }, [workspace]);
   const [reportTab, setReportTab] = useState("report");
   const skipAnnotationKey = useRef("");
+  const seriesLocked = useRef(false);
   const toolRef = useRef("scroll");
   toolRef.current = tool;
 
@@ -194,6 +196,7 @@ export default function Workstation() {
     setLoading(true);
     setError("");
     setPlaying(false);
+    seriesLocked.current = false;
     api(`/api/viewer/studies/${studyId}/catalog`).then((data) => {
       if (controller.signal.aborted) return;
       setCatalog(data);
@@ -204,8 +207,8 @@ export default function Workstation() {
       setMode("stack");
       if (!data.series?.length) setNotice("This study has no stored images.");
       else if (data.pixelsMissing) {
-        setNotice("Patient and study details are here, but the DICOM pixel files are missing from this computer and the archive. Re-upload the study or restore it from Orthanc to view images.");
-        setError("DICOM files are missing — the viewer cannot display this study until the images are restored.");
+        setNotice("Study details are here, but the image files are not on this computer and Orthanc no longer has them. Push the study again from the console to GMSPACS.");
+        setError("Images are missing — re-send this study from the console to Orthanc, then open it again.");
       } else setNotice("");
     }).catch((err) => { if (!controller.signal.aborted) setError(err.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
@@ -214,6 +217,13 @@ export default function Workstation() {
     }).catch(() => { if (!controller.signal.aborted) setAnnotations([]); });
     return () => controller.abort();
   }, [studyId]);
+
+  useEffect(() => {
+    if (!catalog?.series?.length || seriesLocked.current) return;
+    const best = [...catalog.series].sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0))[0];
+    if (!best?._id) return;
+    setSlotSeries((current) => (current[0] === best._id ? current : Array.from({ length: 4 }, () => best._id)));
+  }, [catalog]);
 
   const importing = Boolean(catalog && catalog.archiveInstances > catalog.storedInstances);
   useEffect(() => {
@@ -224,7 +234,7 @@ export default function Workstation() {
           current?.study?._id === data.study?._id && current.storedInstances !== data.storedInstances ? data : current
         ));
       }).catch(() => {});
-    }, 4000);
+    }, 1500);
     return () => clearInterval(timer);
   }, [studyId, importing]);
 
@@ -280,7 +290,7 @@ export default function Workstation() {
       return { imageIds: seriesImageIds(chosen), index: 0, seriesId: chosen._id };
     });
     if (catalog.pixelsMissing || slots.every((slot) => !slot.imageIds.length)) {
-      setError("DICOM files are missing — the viewer cannot display this study until the images are restored.");
+      setError("Images are missing — re-send this study from the console to Orthanc, then open it again.");
       return undefined;
     }
     const metadata = placed.flatMap((item) => metadataEntries(catalog.study, item));
@@ -395,6 +405,7 @@ export default function Workstation() {
   }
 
   function assignSeries(seriesId) {
+    seriesLocked.current = true;
     setSlotSeries((current) => current.map((item, index) => (index === activeSlot ? seriesId : item)));
     setMode("stack");
   }
@@ -588,6 +599,11 @@ export default function Workstation() {
           imageCount={catalog ? imageCount : null}
           previewUrl={previewInstance ? `/api/instances/${previewInstance._id}/orthanc-preview` : ""}
           onOpen={(id) => navigate(`/viewer/${id}`)}
+          seriesList={series}
+          seriesId={activeSeries?._id || ""}
+          onSeries={assignSeries}
+          slice={snapshot.slice || 0}
+          onSlice={(index) => engine.setSlice(index)}
         />
         {workspace !== "report" && (
         <div className="flex min-w-0 flex-1 flex-col" ref={stageRef}>
@@ -614,6 +630,8 @@ export default function Workstation() {
           {importing && <p className="bg-[#1c1c21] px-3 py-1 text-[12px] text-[#c4b5fd]">Importing images from the archive: {catalog.storedInstances} of {catalog.archiveInstances}…</p>}
           {error && <p className="bg-[#3a2412] px-3 py-1 text-[12px] text-amber-100" role="alert">{error}</p>}
           {notice && <p className="bg-[#3a2412] px-3 py-1 text-[12px] text-amber-100">{notice}</p>}
+          <div className="flex min-h-0 min-w-0 flex-1">
+          <SeriesRail series={series} seriesId={activeSeries?._id || ""} onSeries={assignSeries} />
           <DicomViewport
             layoutName={layoutName}
             count={count}
@@ -636,6 +654,7 @@ export default function Workstation() {
               </>
             ) : null)}
           />
+          </div>
           {mode === "stack" && <ThumbnailStrip frames={frames} activeIndex={snapshot.slice} onPick={engine.setSlice} ready={snapshot.count > 0} />}
         </div>
         )}

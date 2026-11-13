@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm ci --workspace server --include-workspace-root
-    startCommand: npm run start
+    startCommand: npm run start -w server
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -21,3 +21,44 @@ services:
         sync: false
       - key: WEB_ORIGIN
         sync: false
+      - key: ORTHANC_URL
+        sync: false
+      - key: ORTHANC_USERNAME
+        sync: false
+      - key: ORTHANC_PASSWORD
+        sync: false
+      - key: ORTHANC_WEBHOOK_TOKEN
+        sync: false
+      - key: ORTHANC_POLLER
+        value: "false"
+
+  # Always-on Changes poller + StableStudy reconciliation. Use a paid instance so it does not sleep.
+  - type: worker
+    name: pacsd-orthanc-worker
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --workspace server --include-workspace-root
+    startCommand: npm run worker -w server
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: MONGOMS_DISABLE_POSTINSTALL
+        value: "1"
+      - key: MONGODB_URI
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ORTHANC_URL
+        sync: false
+      - key: ORTHANC_USERNAME
+        sync: false
+      - key: ORTHANC_PASSWORD
+        sync: false
+      - key: ORTHANC_POLL_MS
+        value: "2000"
+      - key: TRANSFER_STABLE_MS
+        value: "45000"

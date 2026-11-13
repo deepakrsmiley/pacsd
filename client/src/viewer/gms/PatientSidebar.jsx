@@ -12,6 +12,11 @@ export default function PatientSidebar({
   imageCount,
   previewUrl,
   onOpen,
+  seriesList = [],
+  seriesId = "",
+  onSeries,
+  slice = 0,
+  onSlice,
 }) {
   const [tab, setTab] = useState("patient");
   const [query, setQuery] = useState("");
@@ -76,14 +81,24 @@ export default function PatientSidebar({
             Studies ({filtered.length})
           </button>
           {listOpen && filtered.map((study) => (
-            <StudyCard
-              key={study._id}
-              study={study}
-              active={study._id === studyId}
-              images={study._id === studyId ? imageCount : null}
-              previewUrl={study._id === studyId ? previewUrl : ""}
-              onOpen={() => onOpen(study._id)}
-            />
+            <div key={study._id}>
+              <StudyCard
+                study={study}
+                active={study._id === studyId}
+                images={study._id === studyId ? imageCount : null}
+                previewUrl={study._id === studyId ? previewUrl : ""}
+                onOpen={() => onOpen(study._id)}
+              />
+              {study._id === studyId && seriesList.length > 0 && (
+                <SeriesList
+                  seriesList={seriesList}
+                  seriesId={seriesId}
+                  slice={slice}
+                  onSeries={onSeries}
+                  onSlice={onSlice}
+                />
+              )}
+            </div>
           ))}
           {listOpen && filtered.length === 0 && <p className="px-1 text-[12px] text-zinc-500">No studies match this search.</p>}
         </div>
@@ -120,6 +135,43 @@ export function StudyCard({ study, active, images, previewUrl, onOpen }) {
         </span>
       </span>
     </button>
+  );
+}
+
+function SeriesList({ seriesList, seriesId, slice, onSeries, onSlice }) {
+  const active = seriesList.find((item) => item._id === seriesId) || seriesList[0];
+  const images = active?.instances || [];
+  return (
+    <div className="mb-2 ml-3 border-l border-white/10 pl-2">
+      {seriesList.map((item) => (
+        <button
+          key={item._id}
+          type="button"
+          data-active={item._id === active?._id ? "true" : "false"}
+          className="mb-1 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-zinc-300 hover:bg-white/[0.05] data-[active=true]:bg-white/[0.08] data-[active=true]:text-white"
+          onClick={() => onSeries?.(item._id)}
+        >
+          <span className="min-w-0 truncate">Se {item.seriesNumber || "—"} · {item.description || item.modality || "Series"}</span>
+          <span className="shrink-0 tabular-nums text-zinc-400">{item.imageCount || item.instances?.length || 0}</span>
+        </button>
+      ))}
+      {images.length > 0 && (
+        <div className="mt-1 max-h-52 overflow-auto rounded-lg bg-black/30 p-1">
+          {images.map((instance, index) => (
+            <button
+              key={instance._id || index}
+              type="button"
+              data-active={index === slice ? "true" : "false"}
+              className="flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-[11px] text-zinc-400 hover:bg-white/10 data-[active=true]:bg-violet-500/25 data-[active=true]:text-white"
+              onClick={() => onSlice?.(index)}
+            >
+              <span>Im {instance.instanceNumber || index + 1}</span>
+              <span className="tabular-nums">{index + 1}/{images.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
